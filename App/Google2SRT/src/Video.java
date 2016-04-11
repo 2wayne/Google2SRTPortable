@@ -18,27 +18,28 @@
 /**
  *
  * @author kom
- * @version "0.6, 08/11/13"
+ * @author Zoltan Kakuszi
+ * @version "0.7.3, 04/08/15"
  */
 
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.StringWriter;
 import java.io.UnsupportedEncodingException;
-import java.net.MalformedURLException;
-import java.net.URL;
-import java.net.URLConnection;
+import java.net.*;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Vector;
+import java.util.ArrayList;
 import org.apache.commons.io.IOUtils;
 import org.jdom.Attribute;
 import org.jdom.Document;
 import org.jdom.Element;
 import org.jdom.JDOMException;
 import org.jdom.input.SAXBuilder;
+import java.net.Proxy;
 
-public class Network {
+
+public class Video {
     public static class HostNoGV extends Exception {};
     public static class NoDocId extends Exception {};
     public static class NoQuery extends Exception {};
@@ -46,116 +47,154 @@ public class Network {
     public static class NoSubs extends Exception {};
     public static class NoYouTubeParamV extends Exception {};
     
-    private static String _magicURL = "";
-    private static HashMap<String, String> _params;
-    private static NetSubtitle.Method _method;
+    private String _id = null;                // "docid" (Google Video) o "v" (YouTube)
+    private String _magicURL = "";
+    private String _title = "";
+    private HashMap<String, String> _params;
+    private NetSubtitle.Method _method;
+    private String YouTubeWebSource;
+    private String _URL;
+    private List<List<NetSubtitle>> _subsWT;
+    private Proxy proxy;
     
-    public static String getMagicURL() {
+    public Video(String URL) {
+        _subsWT = new ArrayList<List<NetSubtitle>>();
+        _URL = URL;
+    }
+    
+    public String getMagicURL() {
         return _magicURL;
     }
     
-    public static HashMap<String, String> getParams() {
+    public String getURL() {
+        return _URL;
+    }
+    
+    public String getTitle() {
+        return _title;
+    }
+    
+    public String getId() {
+        return _id;
+    }
+    
+    public HashMap<String, String> getParams() {
         return _params;
     }
     
-    public static NetSubtitle.Method getMethod() {
+    public NetSubtitle.Method getMethod() {
         return _method;
     }
     
-    public static void setMethod(NetSubtitle.Method method) {
+    public void setMethod(NetSubtitle.Method method) {
         _method = method;
     }
+
+    public void setProxy(String hostAddress, int port) { // Create Proxy for the current Video object
+        proxy = new Proxy(Proxy.Type.SOCKS, new InetSocketAddress(hostAddress, port));
+    }
+
     
-    
-    public static List<NetSubtitle> getSubtitles(String URL) throws MalformedURLException, HostNoGV, NoQuery, NoDocId, InvalidDocId, UnsupportedEncodingException, JDOMException, IOException, NoSubs, NoYouTubeParamV {
-        return getSubtitlesWithTranslations(URL).get(0);
+    public List<NetSubtitle> getSubtitles() throws MalformedURLException, HostNoGV, NoQuery, NoDocId, InvalidDocId, UnsupportedEncodingException, JDOMException, IOException, NoSubs, NoYouTubeParamV {
+        if (_subsWT.isEmpty())
+            getSubtitlesWithTranslations(); // _subsWT = getSubtitlesWithTranslations(URL)
+        
+        return _subsWT.get(0);
     }
     
-    public static List<List<NetSubtitle>> getSubtitlesWithTranslations(String URL) throws MalformedURLException, HostNoGV, NoQuery, NoDocId, InvalidDocId, UnsupportedEncodingException, JDOMException, IOException, NoSubs, NoYouTubeParamV {
+    public List<List<NetSubtitle>> getSubtitlesWithTranslations() throws MalformedURLException, HostNoGV, NoQuery, NoDocId, InvalidDocId, UnsupportedEncodingException, JDOMException, IOException, NoSubs, NoYouTubeParamV {
         String urlList;
         URL url;
         Document xmlDoc;
         List<NetSubtitle> lTracks;
         List<List<NetSubtitle>> result;
+        
+        // Already retrieved
+        if (! _subsWT.isEmpty()) return _subsWT;
             
-        url = new URL(URL);
-        result = new Vector<List<NetSubtitle>>();
+        url = new URL(_URL);
+        result = new ArrayList<List<NetSubtitle>>();
             
         if (url.getHost() == null) {
             throw new HostNoGV();
         } else if (url.getHost().indexOf("video.google.com") != -1) {
-            //param = docidFromURL(url);
-            _params = getURLParams(URL);
-            Network.setMethod(NetSubtitle.Method.Google);
-            urlList = NetSubtitle.getListURL(Network.getMethod(), Network.getParams());
+            _params = getURLParams(_URL);
+            setMethod(NetSubtitle.Method.Google);
+            urlList = NetSubtitle.getListURL(getMethod(), getParams());
             xmlDoc = readListURL(urlList);
-            lTracks = getListSubs(xmlDoc, Network.getParams());
-            result = new Vector<List<NetSubtitle>>();
+            lTracks = getListSubs(xmlDoc, getParams());
+            result = new ArrayList<List<NetSubtitle>>();
             result.add(lTracks);
-            result.add(new Vector<NetSubtitle>());
+            result.add(new ArrayList<NetSubtitle>());
         } else if (url.getHost().indexOf("youtube.com") != -1
                 || url.getHost().indexOf("youtu.be") != -1) {
             
             if (url.getHost().indexOf("youtu.be") != -1) {
                 // http://youtu.be/c8RGPpcenZY => https://www.youtube.com/watch?v=c8RGPpcenZY
-                
                 String s;
                 try { s = url.getFile(); }
                 catch (Exception e) { s = " "; }
                 
                 url = new URL("https://www.youtube.com/watch?v=" + s.substring(1, s.length()));
-                URL = url.toString();
+                _URL = url.toString();
             } else 
             {
                 // http://www.youtube.com/watch?v=c8RGPpcenZY => https://www.youtube.com/watch?v=c8RGPpcenZY
 
                 url = new URL(url.toString().replace("http://", "https://"));
-                URL = url.toString();
+                _URL = url.toString();
             }
             
-            System.out.println("(DEBUG) Final video URL: " + URL);
-            
+            if (Settings.DEBUG) System.out.println("(DEBUG) Final video URL: " + _URL);
             try {
-                _magicURL = retrieveMagicURL(URL);
-                _params = getURLParams(Network.getMagicURL());
-                Network.setMethod(NetSubtitle.Method.YouTubeSignature);
-                urlList = NetSubtitle.getListURL(Network.getMethod(), Network.getParams());
+                _magicURL = retrieveMagicURL(_URL);
+                _title = retrieveVideoTitle();
+                _params = getURLParams(getMagicURL());
+                setMethod(NetSubtitle.Method.YouTubeSignature);
+                urlList = NetSubtitle.getListURL(getMethod(), getParams());
                 xmlDoc = readListURL(urlList);
-                result = getListSubsWithTranslations(xmlDoc, Network.getParams(), Network.getMethod());
+                result = getListSubsWithTranslations(xmlDoc, getParams(), getMethod());
             }
             catch (Exception ex) {
-                System.out.println("(DEBUG) Exception reading via Signature mode. Switching to Legacy mode...");
+                if (Settings.DEBUG) System.out.println("(DEBUG) Exception reading via Signature mode. Switching to Legacy mode...");
                 _magicURL = "";
-                _params = getURLParams(URL);
-                Network.setMethod(NetSubtitle.Method.YouTubeLegacy);
-                urlList = NetSubtitle.getListURL(Network.getMethod(), Network.getParams());
+                _title = "";
+                _params = getURLParams(_URL);
+                setMethod(NetSubtitle.Method.YouTubeLegacy);
+                urlList = NetSubtitle.getListURL(getMethod(), getParams());
                 xmlDoc = readListURL(urlList);
-                result = getListSubsWithTranslations(xmlDoc, Network.getParams(), Network.getMethod());
+                result = getListSubsWithTranslations(xmlDoc, getParams(), getMethod());
             }
             
         } else {
             throw new HostNoGV();
         }
 
+        _subsWT = result;
         return result;
     }
     
-    public static String retrieveMagicURL(String YouTubeURL) throws MalformedURLException, IOException {
+    public String retrieveMagicURL(String YouTubeURL) throws MalformedURLException, IOException {
             
-            String magicURL, YouTubeWebSource;
+            String magicURL;
             InputStreamReader isr;
             
-            isr = Network.readURL(YouTubeURL);
-            YouTubeWebSource = Network.readURL(isr);   
+            isr = readURL(YouTubeURL);
+            YouTubeWebSource = readURL(isr);
             magicURL = NetSubtitle.getMagicURL(YouTubeWebSource);
             
-            System.out.println("(DEBUG) *Magic* URL: " + magicURL);
             
+            if (Settings.DEBUG) System.out.println("(DEBUG) *Magic* URL: " + magicURL);
             return magicURL;
     }
     
+    public String retrieveVideoTitle() {
+        return (YouTubeWebSource != null) ?
+                NetSubtitle.getVideoTitleFromSource(YouTubeWebSource) : "";
+    }
     
-    public static HashMap<String, String> getURLParams(String URL) throws MalformedURLException {
+    
+    public HashMap<String, String> getURLParams(String URL) throws MalformedURLException {
         URL url;
         String[] sparams;
         HashMap<String, String> mparams;
@@ -189,23 +228,21 @@ public class Network {
         return mparams;
     }
     
-    private static Document readListURL(String url) throws MalformedURLException, JDOMException, IOException {
+    private Document readListURL(String url) throws MalformedURLException, JDOMException, IOException {
         SAXBuilder parser = new SAXBuilder();
         InputStreamReader isr;
 
         isr = readURL(url);
-
         return parser.build(isr);
-        
     }
     
-    private static List<NetSubtitle> getListSubs(Document xml,
+    private List<NetSubtitle> getListSubs(Document xml,
             HashMap<String, String> params)
             throws NoSubs, UnsupportedEncodingException {
         return getListSubsWithTranslations(xml, params, NetSubtitle.Method.Google).get(0);
     }
     
-    private static List<List<NetSubtitle>> getListSubsWithTranslations(Document xml,
+    private List<List<NetSubtitle>> getListSubsWithTranslations(Document xml,
             HashMap<String, String> params,
             NetSubtitle.Method method)
             throws NoSubs, UnsupportedEncodingException {
@@ -214,8 +251,8 @@ public class Network {
         int tam, i, tmpInt;
         Attribute tmpAtt;
         String tmpS, sName, sLang, sLangOrig, sLangTrans;
-        List<NetSubtitle> lTracks = new Vector<NetSubtitle>();
-        List<NetSubtitle> lTargets = new Vector<NetSubtitle>();
+        List<NetSubtitle> lTracks = new ArrayList<NetSubtitle>();
+        List<NetSubtitle> lTargets = new ArrayList<NetSubtitle>();
         List<List<NetSubtitle>> resultat;
         NetSubtitle tNS;
         
@@ -234,15 +271,15 @@ public class Network {
         i = 0;
         while (i < tam) {
             track = tracks.get(i);
-            tmpAtt = track.getAttribute("id");
-            if (tmpAtt != null) {
-                tmpS = tmpAtt.getValue();
-                tmpInt = Integer.valueOf(tmpS);
-                if (track != null) {
-                    
+            if (track != null) {
+                tmpAtt = track.getAttribute("id");
+                if (tmpAtt != null) {
+                    tmpS = tmpAtt.getValue();
+                    tmpInt = Integer.valueOf(tmpS);
+
                     //<track id="0" name="" lang_code="ca" lang_original="Català" lang_translated="Catalan" cantran="true"/>
                     //<target id="42" lang_code="ca" lang_original="Català" lang_translated="Catalan"/>
-                    
+
                     tmpAtt = track.getAttribute("lang_code");
                     sLang = tmpAtt.getValue();
                     tmpAtt = track.getAttribute("lang_original");
@@ -250,24 +287,24 @@ public class Network {
                     tmpAtt = track.getAttribute("lang_translated");
                     sLangTrans = tmpAtt.getValue();
 
-                    tNS = new NetSubtitle();
+                    tNS = new NetSubtitle(this);
                     switch (method)
                     {
                         case Google:
-                            tNS.setId(params.get("docid"));
+                            _id = params.get("docid"); //tNS.setId(params.get("docid"));
                             break;
                         case YouTubeLegacy:
                         case YouTubeSignature:
-                            tNS.setId(params.get("v"));
+                            _id = params.get("v"); // tNS.setId(params.get("v"));
                             break;
                         default:
-                            tNS.setId("");
+                            _id = ""; // tNS.setId("");
                     }
                     tNS.setIdXML(tmpInt);
                     tNS.setLang(sLang);
                     tNS.setLangOriginal(sLangOrig);
                     tNS.setLangTranslated(sLangTrans);
-                    
+
                     tmpS = track.getName();
                     if ("track".equals(tmpS))
                     {
@@ -285,8 +322,7 @@ public class Network {
                         }
                         tNS.setTrack(true);
                         lTracks.add(tNS);
-                    }
-                    else if ("target".equals(tmpS))
+                    } else if ("target".equals(tmpS))
                     {
                         tNS.setType(NetSubtitle.Tipus.YouTubeTarget);
                         lTargets.add(tNS);
@@ -296,7 +332,7 @@ public class Network {
             i++;
         }
         
-        resultat = new Vector<List<NetSubtitle>>();
+        resultat = new ArrayList<List<NetSubtitle>>();
         resultat.add(lTracks);
         resultat.add(lTargets);
             
@@ -304,30 +340,34 @@ public class Network {
     }
     
     
-    public static InputStreamReader readURL(String s) throws MalformedURLException, IOException {
-        URL url;
-        InputStreamReader isr;
-        String appName, appVersion;
+    public InputStreamReader readURL(String s) throws MalformedURLException, IOException {
+            URL url;
+            InputStreamReader isr;
+            String appName, appVersion;
+            URLConnection urlconn;
 
-        appName = java.util.ResourceBundle.getBundle("Bundle").getString("app.name");
-        appVersion = java.util.ResourceBundle.getBundle("Bundle").getString("app.version");
-        
-        url = new URL(s);
-        URLConnection urlconn = url.openConnection();
-        urlconn.setRequestProperty("Accept",
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
-        urlconn.setRequestProperty("Accept-Charset",
-            "ISO-8859-1,utf-8;q=0.7,*;q=0.7");
-        urlconn.setRequestProperty("User-Agent",
-            "Mozilla/5.0 (compatible; " + appName + "/" + appVersion + ")");
-        urlconn.connect();
+            appName = java.util.ResourceBundle.getBundle("Bundle").getString("app.name");
+            appVersion = java.util.ResourceBundle.getBundle("Bundle").getString("app.version");
+
+            url = new URL(s);
+            if (proxy != null) {
+                urlconn = url.openConnection(proxy);
+            } else {
+                urlconn = url.openConnection();
+            }
+            urlconn.setRequestProperty("Accept",
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+            urlconn.setRequestProperty("Accept-Charset",
+                    "ISO-8859-1,utf-8;q=0.7,*;q=0.7");
+            urlconn.setRequestProperty("User-Agent",
+                    "Mozilla/5.0 (compatible; " + appName + "/" + appVersion + ")");
+            urlconn.connect();
 
         isr = new InputStreamReader(urlconn.getInputStream(), "UTF-8");
-        
         return isr;
     }
     
-    public static String readURL(InputStreamReader isr) throws IOException {
+    public String readURL(InputStreamReader isr) throws IOException {
         String s;
         
         StringWriter writer = new StringWriter();

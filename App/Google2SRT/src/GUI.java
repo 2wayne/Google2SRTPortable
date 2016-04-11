@@ -18,60 +18,432 @@
 /**
  *
  * @author kom
- * @version "0.6, 08/11/13"
+ * @author Zoltan Kakuszi
+ * @version "0.7.4, 10/19/15"
  */
 
 
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.InputStreamReader;
-import java.net.MalformedURLException;
+import java.net.UnknownHostException;
+import java.text.MessageFormat;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.MissingResourceException;
-import java.util.Vector;
-import javax.swing.JFileChooser;
+import javax.swing.*;
+import javax.swing.table.TableRowSorter;
+import java.net.InetAddress;
 
 
 
 public class GUI extends javax.swing.JFrame {
-    TableModel tablemodelTracks, tablemodelTargets;
+    TableModel tablemodelTracks, tablemodelTargets; // graphical subtitles containers
     
     java.util.ResourceBundle bundle = GUI.getBundle();
-    enum tIdioma {ca, en, es, it, pt_BR, zh_HanS, zh_HanT};
     
-    private String defaultURL = "";
-    // http://www.youtube.com/watch?v=c8RGPpcenZY (4 real tracks)
-    // http://www.youtube.com/watch?v=XraeBDMm2PM (5 real tracks with names)
-    // http://www.youtube.com/watch?v=IElqf-FCMs8 (EN ASR + EN track)
-    // http://www.youtube.com/watch?v=UOfn1cTARrY (ES ASR)
-    // http://www.youtube.com/watch?v=PH8JuizIXw8 (EN ASR + many real tracks)
-    private String defaultFile = System.getProperty("user.home") +
-                                    System.getProperty("file.separator") +
-                                    "videotranscript.xml";
-    private String defaultFileOut = System.getProperty("user.home") +
-                                    System.getProperty("file.separator") +
-                                    "output.srt";
     private final JFileChooser fc1 = new JFileChooser(),
                                fc2 = new JFileChooser();
-
-    private List<List<NetSubtitle>> lSubsWithTranslations;
+     
+    private boolean msgInfileInvalidFormat, msgIOException; // Errors generated deep inside
     
-    private boolean msgInfileInvalidFormat, msgIOException;
+    private static Settings appSettings;    // Application settings
+    private static Controller _controller;  // Application controller
     
-    /** Creates new form gui */
+    private boolean _selectAllTracks = false; // Select All if "true". Clear selection if "false"
+    private boolean _selectAllTargets = false; // Select All if "true". Clear selection if "false"
+    
+    
+    /** Creates new form GUI */
     public GUI() {
         initComponents();
 
-        this.lSubsWithTranslations = new Vector<List<NetSubtitle>>(); this.lSubsWithTranslations.add(new Vector<NetSubtitle>()); this.lSubsWithTranslations.add(new Vector<NetSubtitle>());
+        // Icon setup
+        setIconImage((new javax.swing.ImageIcon(getClass().getResource("/logo.png"))).getImage());
+       
+        // Load settings
+        appSettings = new Settings(bundle);
+        appSettings.loadSettings();
+        
+        _controller = new Controller(this, appSettings);
 
-        this.setLanguage(bundle.getLocale().getLanguage());
-        this.jtfInput.setText(defaultURL);
-        this.jtfOutput.setText(defaultFileOut);
+        setLanguage(appSettings.getLocaleLanguage());
+        jtfInput.setText(appSettings.getURLInput());
+        jtfOutput.setText(appSettings.getOutput());
+        jcbTitle.setSelected(appSettings.getIncludeTitleInFilename());
+        jcbTiming.setSelected(appSettings.getRemoveTimingSubtitles());
+        jcbTrackName.setSelected(appSettings.getIncludeTrackNameInFilename());
         
+        
+        fc1.setAcceptAllFileFilterUsed(false);
+        fc1.addChoosableFileFilter(new SupportedFileTypesFilter());
         fc1.addChoosableFileFilter(new XMLFilter());
-        fc2.addChoosableFileFilter(new SRTFilter());
+        fc1.addChoosableFileFilter(new TXTFilter());
+        fc1.setCurrentDirectory(new java.io.File(appSettings.getFileInput()));
+        
+        fc2.setCurrentDirectory(new java.io.File(appSettings.getOutput()));
+        fc2.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        
+        tmSubtitlesLists_init();
         
         
+        jtTrackList.setAutoCreateRowSorter(true);        
+        jtTargetList.setAutoCreateRowSorter(true);
+        
+        // *** TRANSLATION PENDING ***
+        this.jbutSetLangFr.setVisible(false);
+        this.jbutSetLangPl.setVisible(false);
+        
+        // Window is centered
+        pack();
+        setLocationRelativeTo(null);
+    }
+    
+    public static void main(String args[]) {
+        
+        // Set System Look&Feel
+        try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()); } 
+        catch (Exception ex) { }
+        
+        java.awt.EventQueue.invokeLater(new Runnable() {
+            @Override
+            public void run() {
+               new GUI().setVisible(true);
+            }
+        });
+        
+        Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
+            @Override
+            public void run() {
+                // Save settings before exiting
+                appSettings.saveSettings();
+            }
+         }));
+    }
+    
+    protected void appErrorBundleMessage(String bundleString) {
+        String msg;
+        
+        msg = bundle.getString(bundleString);
+        javax.swing.JOptionPane.showMessageDialog(null, msg);
+    }
+    
+    protected boolean appManySelectedWarning(int numSelected) {
+        String msg;
+        
+        msg = MessageFormat.format(bundle.getString("msg.conversion.many.subtitles"), numSelected);
+        return JOptionPane.showConfirmDialog(null, msg, "", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION;
+    }
+    
+    protected void appLogsBundleMessage(String bundleString, String detail) {
+        String msg;
+        
+        msg = bundle.getString(bundleString);
+        this.jtaLogs.append(detail + ": " + msg + "\n");
+    }
+    
+    protected void appLogsClear() {
+        this.jtaLogs.setText("");
+    }
+    
+    protected void appStatusBundleMessage(String bundleString) {
+        String msg;
+        
+        msg = bundle.getString(bundleString);
+        this.jlStatus.setText(msg);
+    }
+    
+    protected void appStatusClear() {
+        this.jlStatus.setText("");
+    }
+    
+    protected void appStatusConverting(int progress, int total) {
+        String msg;
+        
+        if (appSettings.isProxySet()) {
+            msg = bundle.getString("msg.status.connecting.proxy") + " " + appSettings.getProxyHost() + ":" + appSettings.getPort() + ": " + bundle.getString("msg.status.converting") + " " + progress + "/" + total;
+            this.jlStatus.setText(msg);
+        } else {
+            msg = bundle.getString("msg.status.converting") + " " + progress + "/" + total;
+            this.jlStatus.setText(msg);
+        }
+    }
+    
+    protected void appStatusConnecting(int progress, int total) {
+        String msg;
+        if (appSettings.isProxySet()) {
+            msg = bundle.getString("msg.status.connecting.proxy") + " " + appSettings.getProxyHost() + ":" + appSettings.getPort() + ": " + progress + "/" + total;
+            this.jlStatus.setText(msg);
+        } else {
+            msg = bundle.getString("msg.status.connecting") + " " + progress + "/" + total;
+            this.jlStatus.setText(msg);
+        }
+    }
+   
+    public void setMsgInfileInvalidFormat() {
+        this.msgInfileInvalidFormat = true;
+    }
+    
+    public void setMsgIOException() {
+        this.msgIOException = true;
+    }
+    
+    public void prepareNewConversion() {
+        this.enableControls(true);
+        this.jlStatus.setText("");
+        
+        if (msgIOException) appErrorBundleMessage("msg.io.error");
+        if (msgInfileInvalidFormat) appErrorBundleMessage("msg.infile.invalid.format");
+        
+        msgIOException = false;
+        msgInfileInvalidFormat = false;
+        
+    }
+    
+    public void enableControls(boolean enable)
+    {
+        this.jbutConvert.setEnabled(enable);
+        this.jbutInput.setEnabled(enable);
+        this.jbutOutput.setEnabled(enable);
+        this.jrbURL.setEnabled(enable);
+        this.jrbURLListXML.setEnabled(enable);
+        this.jcbAll.setEnabled(enable);
+        this.jcbInvert.setEnabled(enable);
+        this.jcbTitle.setEnabled(enable);
+        this.jcbTiming.setEnabled(enable);
+        this.jcbTrackName.setEnabled(enable);
+        this.jtfInput.setEnabled(enable);
+        this.jtfOutput.setEnabled(enable);
+        this.jspinnerDelay.setEnabled(enable);
+        this.jtTrackList.setEnabled(enable);
+        this.jtTrackList.getTableHeader().setEnabled(enable);
+        this.jtTargetList.setEnabled(enable);
+        this.jtTargetList.getTableHeader().setEnabled(enable);
+        this.jtfHostInput.setEnabled(enable);
+        this.jspinnerPort.setEnabled(enable);
+    }
+
+    public static java.util.ResourceBundle getBundle() {
+        java.util.ResourceBundle b;
+        try {
+            b = java.util.ResourceBundle.getBundle("Bundle");
+        } catch (MissingResourceException e) {
+            b = java.util.ResourceBundle.getBundle("Bundle", new java.util.Locale("en"));
+        }
+        return b;
+    }
+    
+    protected Double getDelay() {
+        return ((Double)jspinnerDelay.getValue()).doubleValue();
+    }
+    
+    protected Object[][] getTableModelTracksData() {
+        return this.tablemodelTracks.getData();
+    }
+    
+    protected Object[][] getTableModelTargetsData() {
+        return this.tablemodelTargets.getData();
+    }
+    
+    private void setLanguage (String s) {  
+        
+        if (s == null) {
+            bundle = java.util.ResourceBundle.getBundle("Bundle");
+            appSettings.setLocaleLanguage("en");
+        } else
+            try {
+                bundle = java.util.ResourceBundle.getBundle("Bundle_" + s);
+                appSettings.setLocaleLanguage(s);
+            }
+            catch (Exception e) {
+                bundle = java.util.ResourceBundle.getBundle("Bundle");
+                appSettings.setLocaleLanguage("en");
+            }
+
+        if (this.jrbURL.isSelected()) {
+            this.jbutInput.setText(bundle.getString("GUI.jbutInput.text"));
+            this.jbutInput.setToolTipText(bundle.getString("GUI.jbutInput.toolTipText"));
+        } else {
+            this.jbutInput.setText(bundle.getString("GUI.jbutInput.xmlfile.text"));
+            this.jbutInput.setToolTipText(bundle.getString("GUI.jbutInput.xmlfile.toolTipText"));
+        }
+
+        this.jlSubIn.setText(bundle.getString("GUI.jlSubIn.text"));
+        this.jlSubOut.setText(bundle.getString("GUI.jlSubOut.text"));
+        this.jlDelay.setText(bundle.getString("GUI.jlDelay.text"));
+        this.jbutOutput.setText(bundle.getString("GUI.jbutOutput.text"));
+        this.jbutOutput.setToolTipText(bundle.getString("GUI.jbutOutput.toolTipText"));
+        this.jbutConvert.setText(bundle.getString("GUI.jbutConvert.text"));
+        this.jbutConvert.setToolTipText(bundle.getString("GUI.jbutConvert.toolTipText"));
+        this.jtfInput.setToolTipText(bundle.getString("GUI.jtfInput.toolTipText"));
+        this.jtfOutput.setToolTipText(bundle.getString("GUI.jtfOutput.toolTipText"));
+        this.jrbURLListXML.setText(bundle.getString("GUI.jrbURLListXML.text"));
+        this.jrbURLListXML.setToolTipText(bundle.getString("GUI.jrbURLListXML.toolTipText"));
+        this.jrbURL.setText(bundle.getString("GUI.jrbURL.text"));
+        this.jrbURL.setToolTipText(bundle.getString("GUI.jrbURL.toolTipText"));
+        this.jspinnerDelay.setToolTipText(bundle.getString("GUI.jspinnerDelay.toolTipText"));
+        this.jcbInvert.setText(bundle.getString("GUI.jcbInvert.text"));
+        this.jcbInvert.setToolTipText(bundle.getString("GUI.jcbInvert.toolTipText"));
+        this.jcbAll.setText(bundle.getString("GUI.jcbAll.text"));
+        this.jcbAll.setToolTipText(bundle.getString("GUI.jcbAll.toolTipText"));
+        this.jcbTitle.setText(bundle.getString("GUI.jcbTitle.text"));
+        this.jcbTitle.setToolTipText(bundle.getString("GUI.jcbTitle.toolTipText"));
+        this.jcbTiming.setText(bundle.getString("GUI.jcbTiming.text"));
+        this.jcbTiming.setToolTipText(bundle.getString("GUI.jcbTiming.toolTipText"));        
+        this.jcbTrackName.setText(bundle.getString("GUI.jcbTrackName.text"));
+        this.jcbTrackName.setToolTipText(bundle.getString("GUI.jcbTrackName.toolTipText"));
+        this.jmiCut.setText(bundle.getString("GUI.jmiCut.text"));
+        this.jmiCopy.setText(bundle.getString("GUI.jmiCopy.text"));
+        this.jmiPaste.setText(bundle.getString("GUI.jmiPaste.text"));
+        
+        this.jlProxy.setText(bundle.getString("GUI.jlProxy.text"));
+        this.jtfHostInput.setToolTipText(bundle.getString("GUI.jtfHostInput.toolTipText"));
+        this.jspinnerPort.setToolTipText(bundle.getString("GUI.jspinnerPort.toolTipText"));
+        
+        this.jTabbedPane.setTitleAt(0, bundle.getString("GUI.jspTracks.TabConstraints.tabTitle"));
+        this.jTabbedPane.setTitleAt(1, bundle.getString("GUI.jspTargets.TabConstraints.tabTitle"));
+
+        if (tablemodelTracks != null) tablemodelTracks.setBundle(bundle, jtTrackList);
+        if (tablemodelTargets != null) tablemodelTargets.setBundle(bundle, jtTargetList);
+        
+        tmSubtitlesLists_width();
+    }
+    
+    private void tmSubtitlesLists_init() {
+        this.tablemodelTracks = new TableModel(bundle, true);
+        this.jtTrackList.setModel(tablemodelTracks);
+
+        this.tablemodelTargets = new TableModel(bundle, false);
+        this.jtTargetList.setModel(tablemodelTargets);
+        tmSubtitlesLists_width();
+    }
+    
+    protected void tmSubtitlesLists_populate() {
+        TableRowSorter<TableModel> jtTrackListSorter;
+        List <RowSorter.SortKey> sortKeys;
+        
+        jtTrackListSorter = new TableRowSorter<TableModel>(tablemodelTracks);
+        jtTrackList.setRowSorter(jtTrackListSorter);
+        sortKeys  = new ArrayList<RowSorter.SortKey>();
+        sortKeys.add(new RowSorter.SortKey(5, SortOrder.ASCENDING)); // Title
+        sortKeys.add(new RowSorter.SortKey(1, SortOrder.ASCENDING)); // Language code
+        jtTrackListSorter.setSortKeys(sortKeys);
+        
+        jtTargetList.setRowSorter(new TableRowSorter<TableModel>(tablemodelTargets));
+        
+        jtTargetList.getRowSorter().toggleSortOrder(1);
+        
+        _selectAllTracks = false;
+        _selectAllTargets = false;
+
+        if (!_controller.islSubsWithTranslationsNull()) {
+            tablemodelTracks.init(_controller.getTracks());
+            tablemodelTargets.init(_controller.getTargets());
+        }
+        
+        tmSubtitlesLists_width();
+    }
+    
+    protected void tmSubtitlesLists_clear() {
+        if (tablemodelTracks != null) { tablemodelTracks.clear(); }
+        if (tablemodelTargets != null) { tablemodelTargets.clear(); }
+    }
+    
+    private void tmSubtitlesLists_width() {
+        javax.swing.table.TableColumnModel tcm;
+        
+        tcm = jtTrackList.getColumnModel();
+        tcm.getColumn(0).setMaxWidth(80); tcm.getColumn(0).setPreferredWidth(80);       // Convert
+        tcm.getColumn(1).setMaxWidth(120); tcm.getColumn(1).setPreferredWidth(120);     // Language code
+        tcm.getColumn(2).setMaxWidth(125); tcm.getColumn(2).setPreferredWidth(125);     // Language name
+        tcm.getColumn(3).setMaxWidth(150); tcm.getColumn(3).setPreferredWidth(115);     // Track name (reasonable max)
+        tcm.getColumn(4).setMaxWidth(110); tcm.getColumn(4).setPreferredWidth(110);     // Video
+                                                                                        // Title (max available)
+        
+        tcm = jtTargetList.getColumnModel();
+        tcm.getColumn(0).setMaxWidth(80); tcm.getColumn(0).setPreferredWidth(80);       // Convert
+        tcm.getColumn(1).setMaxWidth(120); tcm.getColumn(1).setPreferredWidth(120);     // Language code
+                                                                                        // Language name (max avaialble)
+    }
+    
+    // Count how many tracks are selected
+    protected int tmSubtitlesLists_getNumberSelectedTracks() {
+        Object[][] dataTracks;
+        int i, selectedCountTotalTracks;
+        
+        dataTracks = getTableModelTracksData();
+        
+        for (i = 0, selectedCountTotalTracks = 0; i < dataTracks.length; i++)
+            if (((Boolean) dataTracks[i][0]).booleanValue())
+                selectedCountTotalTracks++;
+        
+        return selectedCountTotalTracks;
+    }
+    
+    // Count how many targets are selected
+    protected int tmSubtitlesLists_getNumberSelectedTargets() {
+        Object[][] dataTargets;
+        int i, selectedCountTotalTargets;
+        
+        dataTargets = getTableModelTargetsData();
+        
+        for (i = 0, selectedCountTotalTargets = 0; i < dataTargets.length; i++)
+            if (((Boolean) dataTargets[i][0]).booleanValue())
+                selectedCountTotalTargets++;
+        
+        return selectedCountTotalTargets;
+    }
+
+    protected void loadInputFile(String path) {
+        final InputStreamReader final_isr; // workaround to pass "isr" to the thread
+        InputStreamReader isr = null;
+        
+        if ("".equals(path)) {
+            appErrorBundleMessage("msg.infile.not.specified");
+            prepareNewConversion();
+            return;
+        }
+
+        // Loading input file
+        try {
+            isr = new InputStreamReader(new FileInputStream(path), "UTF-8");
+        } catch (FileNotFoundException ex) {
+            this.setMsgIOException();
+            prepareNewConversion();
+            return;
+        } catch (java.io.UnsupportedEncodingException ex) {
+            if (Settings.DEBUG) System.out.println("(DEBUG) encoding not supported");
+        }
+
+        _controller.initSubtitlesDataStructure();
+        this.tmSubtitlesLists_clear();
+        
+        // Is it an XML file? => If so we are done
+        if (!Converter.isXML(isr)) {
+
+            // Converter.isXML() usage requires reloading the file
+            try {
+                isr = new InputStreamReader(new FileInputStream(path), "UTF-8");
+            } catch (FileNotFoundException ex) {
+                this.setMsgIOException();
+                prepareNewConversion();
+                return;
+            } catch (java.io.UnsupportedEncodingException ex) {
+                if (Settings.DEBUG) System.out.println("(DEBUG) encoding not supported");
+            }
+
+            // Getting list of URL from text file
+            this.enableControls(false);
+
+            final_isr = isr; // workaround to pass "isr" to the thread
+
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    _controller.processURLListFile(final_isr);
+                }
+            }).start();
+        }
     }
     
     /** This method is called from within the constructor to
@@ -88,7 +460,7 @@ public class GUI extends javax.swing.JFrame {
         jmiCopy = new javax.swing.JMenuItem();
         jmiPaste = new javax.swing.JMenuItem();
         jrbURL = new javax.swing.JRadioButton();
-        jrbXML = new javax.swing.JRadioButton();
+        jrbURLListXML = new javax.swing.JRadioButton();
         jtfInput = new javax.swing.JTextField();
         jtfOutput = new javax.swing.JTextField();
         jbutInput = new javax.swing.JButton();
@@ -99,24 +471,36 @@ public class GUI extends javax.swing.JFrame {
         jlSubOut = new javax.swing.JLabel();
         jlDelay = new javax.swing.JLabel();
         jbutSetLangCa = new javax.swing.JButton();
-        jbutSetLangEs = new javax.swing.JButton();
+        jbutSetLangDe = new javax.swing.JButton();
         jbutSetLangEn = new javax.swing.JButton();
+        jbutSetLangEs = new javax.swing.JButton();
+        jbutSetLangFr = new javax.swing.JButton();
+        jbutSetLangIt = new javax.swing.JButton();
+        jbutSetLangPl = new javax.swing.JButton();
+        jbutSetLangPtBr = new javax.swing.JButton();
+        jbutSetLangRu = new javax.swing.JButton();
+        jbutSetLangZhHanS = new javax.swing.JButton();
+        jbutSetLangZhHansT = new javax.swing.JButton();
         jlStatus = new javax.swing.JLabel();
         jcbAll = new javax.swing.JCheckBox();
         jcbInvert = new javax.swing.JCheckBox();
-        jbutSetLangPtBr = new javax.swing.JButton();
-        jbutSetLangIt = new javax.swing.JButton();
         jcbTrackName = new javax.swing.JCheckBox();
+        jcbTitle = new javax.swing.JCheckBox();
+        jcbTiming = new javax.swing.JCheckBox();
         jTabbedPane = new javax.swing.JTabbedPane();
         jspTracks = new javax.swing.JScrollPane();
         jtTrackList = new javax.swing.JTable();
-        jpTargets = new javax.swing.JPanel();
         jspTargets = new javax.swing.JScrollPane();
         jtTargetList = new javax.swing.JTable();
-        jlSource = new javax.swing.JLabel();
-        jcmbSource = new javax.swing.JComboBox();
-        jbutSetLangZhHanS = new javax.swing.JButton();
-        jbutSetLangZhHansT = new javax.swing.JButton();
+        jspLogs = new javax.swing.JScrollPane();
+        jtaLogs = new javax.swing.JTextArea();
+        jbutHelp = new javax.swing.JButton();
+        jbutWeb = new javax.swing.JButton();
+        jbutAbout = new javax.swing.JButton();
+        jbutSetLangUk = new javax.swing.JButton();
+        jlProxy = new javax.swing.JLabel();
+        jtfHostInput = new javax.swing.JTextField();
+        jspinnerPort = new javax.swing.JSpinner();
 
         jmiCut.setAction(new javax.swing.text.DefaultEditorKit.CutAction());
         jpmContextual.add(jmiCut);
@@ -130,7 +514,7 @@ public class GUI extends javax.swing.JFrame {
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
         setTitle(java.util.ResourceBundle.getBundle("Bundle").getString("app.name") + " " + java.util.ResourceBundle.getBundle("Bundle").getString("app.version"));
         setBounds(new java.awt.Rectangle(0, 0, 0, 0));
-        setResizable(false);
+        setMinimumSize(new java.awt.Dimension(635, 420));
 
         subsSource.add(jrbURL);
         jrbURL.setSelected(true);
@@ -143,12 +527,12 @@ public class GUI extends javax.swing.JFrame {
             }
         });
 
-        subsSource.add(jrbXML);
-        jrbXML.setText(bundle.getString("GUI.jrbXML.text")); // NOI18N
-        jrbXML.setToolTipText(bundle.getString("GUI.jrbXML.toolTipText")); // NOI18N
-        jrbXML.addItemListener(new java.awt.event.ItemListener() {
+        subsSource.add(jrbURLListXML);
+        jrbURLListXML.setText(bundle.getString("GUI.jrbURLListXML.text")); // NOI18N
+        jrbURLListXML.setToolTipText(bundle.getString("GUI.jrbURLListXML.toolTipText")); // NOI18N
+        jrbURLListXML.addItemListener(new java.awt.event.ItemListener() {
             public void itemStateChanged(java.awt.event.ItemEvent evt) {
-                jrbXMLItemStateChanged(evt);
+                jrbURLListXMLItemStateChanged(evt);
             }
         });
 
@@ -223,27 +607,132 @@ public class GUI extends javax.swing.JFrame {
         jbutSetLangCa.setFont(new java.awt.Font("Tahoma", 0, 8)); // NOI18N
         jbutSetLangCa.setIcon(new javax.swing.ImageIcon(getClass().getResource("/ca.jpg"))); // NOI18N
         jbutSetLangCa.setToolTipText(bundle.getString("GUI.jbutSetLangCa.toolTipText")); // NOI18N
+        jbutSetLangCa.setBorder(null);
+        jbutSetLangCa.setBorderPainted(false);
+        jbutSetLangCa.setFocusPainted(false);
         jbutSetLangCa.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 jbutSetLangCaActionPerformed(evt);
             }
         });
 
-        jbutSetLangEs.setFont(new java.awt.Font("Tahoma", 0, 8)); // NOI18N
-        jbutSetLangEs.setIcon(new javax.swing.ImageIcon(getClass().getResource("/es.jpg"))); // NOI18N
-        jbutSetLangEs.setToolTipText(bundle.getString("GUI.jbutSetLangEs.toolTipText")); // NOI18N
-        jbutSetLangEs.addActionListener(new java.awt.event.ActionListener() {
+        jbutSetLangDe.setFont(new java.awt.Font("Tahoma", 0, 8)); // NOI18N
+        jbutSetLangDe.setIcon(new javax.swing.ImageIcon(getClass().getResource("/de.jpg"))); // NOI18N
+        jbutSetLangDe.setToolTipText(bundle.getString("GUI.jbutSetLangDe.toolTipText")); // NOI18N
+        jbutSetLangDe.setBorder(null);
+        jbutSetLangDe.setBorderPainted(false);
+        jbutSetLangDe.setFocusPainted(false);
+        jbutSetLangDe.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
-                jbutSetLangEsActionPerformed(evt);
+                jbutSetLangDeActionPerformed(evt);
             }
         });
 
         jbutSetLangEn.setFont(new java.awt.Font("Tahoma", 0, 8)); // NOI18N
         jbutSetLangEn.setIcon(new javax.swing.ImageIcon(getClass().getResource("/en.jpg"))); // NOI18N
         jbutSetLangEn.setToolTipText(bundle.getString("GUI.jbutSetLangEn.toolTipText")); // NOI18N
+        jbutSetLangEn.setBorder(null);
+        jbutSetLangEn.setBorderPainted(false);
+        jbutSetLangEn.setFocusPainted(false);
         jbutSetLangEn.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 jbutSetLangEnActionPerformed(evt);
+            }
+        });
+
+        jbutSetLangEs.setFont(new java.awt.Font("Tahoma", 0, 8)); // NOI18N
+        jbutSetLangEs.setIcon(new javax.swing.ImageIcon(getClass().getResource("/es.jpg"))); // NOI18N
+        jbutSetLangEs.setToolTipText(bundle.getString("GUI.jbutSetLangEs.toolTipText")); // NOI18N
+        jbutSetLangEs.setBorder(null);
+        jbutSetLangEs.setBorderPainted(false);
+        jbutSetLangEs.setFocusPainted(false);
+        jbutSetLangEs.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jbutSetLangEsActionPerformed(evt);
+            }
+        });
+
+        jbutSetLangFr.setFont(new java.awt.Font("Tahoma", 0, 8)); // NOI18N
+        jbutSetLangFr.setIcon(new javax.swing.ImageIcon(getClass().getResource("/fr.jpg"))); // NOI18N
+        jbutSetLangFr.setToolTipText(bundle.getString("GUI.jbutSetLangFr.toolTipText")); // NOI18N
+        jbutSetLangFr.setBorder(null);
+        jbutSetLangFr.setBorderPainted(false);
+        jbutSetLangFr.setFocusPainted(false);
+        jbutSetLangFr.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jbutSetLangFrActionPerformed(evt);
+            }
+        });
+
+        jbutSetLangIt.setFont(new java.awt.Font("Tahoma", 0, 8)); // NOI18N
+        jbutSetLangIt.setIcon(new javax.swing.ImageIcon(getClass().getResource("/it.jpg"))); // NOI18N
+        jbutSetLangIt.setToolTipText(bundle.getString("GUI.jbutSetLangIt.toolTipText")); // NOI18N
+        jbutSetLangIt.setBorder(null);
+        jbutSetLangIt.setBorderPainted(false);
+        jbutSetLangIt.setFocusPainted(false);
+        jbutSetLangIt.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jbutSetLangItActionPerformed(evt);
+            }
+        });
+
+        jbutSetLangPl.setFont(new java.awt.Font("Tahoma", 0, 8)); // NOI18N
+        jbutSetLangPl.setIcon(new javax.swing.ImageIcon(getClass().getResource("/pl.jpg"))); // NOI18N
+        jbutSetLangPl.setToolTipText(bundle.getString("GUI.jbutSetLangPl.toolTipText")); // NOI18N
+        jbutSetLangPl.setBorder(null);
+        jbutSetLangPl.setBorderPainted(false);
+        jbutSetLangPl.setFocusPainted(false);
+        jbutSetLangPl.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jbutSetLangPlActionPerformed(evt);
+            }
+        });
+
+        jbutSetLangPtBr.setFont(new java.awt.Font("Tahoma", 0, 8)); // NOI18N
+        jbutSetLangPtBr.setIcon(new javax.swing.ImageIcon(getClass().getResource("/pt_BR.jpg"))); // NOI18N
+        jbutSetLangPtBr.setToolTipText(bundle.getString("GUI.jbutSetLangPtBr.toolTipText")); // NOI18N
+        jbutSetLangPtBr.setBorder(null);
+        jbutSetLangPtBr.setBorderPainted(false);
+        jbutSetLangPtBr.setFocusPainted(false);
+        jbutSetLangPtBr.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jbutSetLangPtBrActionPerformed(evt);
+            }
+        });
+
+        jbutSetLangRu.setFont(new java.awt.Font("Tahoma", 0, 8)); // NOI18N
+        jbutSetLangRu.setIcon(new javax.swing.ImageIcon(getClass().getResource("/ru.jpg"))); // NOI18N
+        jbutSetLangRu.setToolTipText(bundle.getString("GUI.jbutSetLangRu.toolTipText")); // NOI18N
+        jbutSetLangRu.setBorder(null);
+        jbutSetLangRu.setBorderPainted(false);
+        jbutSetLangRu.setFocusPainted(false);
+        jbutSetLangRu.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jbutSetLangRuActionPerformed(evt);
+            }
+        });
+
+        jbutSetLangZhHanS.setFont(new java.awt.Font("Tahoma", 0, 8)); // NOI18N
+        jbutSetLangZhHanS.setIcon(new javax.swing.ImageIcon(getClass().getResource("/zh_HanS.jpg"))); // NOI18N
+        jbutSetLangZhHanS.setToolTipText(bundle.getString("GUI.jbutSetLangZhHanS.toolTipText")); // NOI18N
+        jbutSetLangZhHanS.setBorder(null);
+        jbutSetLangZhHanS.setBorderPainted(false);
+        jbutSetLangZhHanS.setFocusPainted(false);
+        jbutSetLangZhHanS.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jbutSetLangZhHanSActionPerformed(evt);
+            }
+        });
+
+        jbutSetLangZhHansT.setFont(new java.awt.Font("Tahoma", 0, 8)); // NOI18N
+        jbutSetLangZhHansT.setIcon(new javax.swing.ImageIcon(getClass().getResource("/zh_HanT.jpg"))); // NOI18N
+        jbutSetLangZhHansT.setToolTipText(bundle.getString("GUI.jbutSetLangZhHansT.toolTipText")); // NOI18N
+        jbutSetLangZhHansT.setBorder(null);
+        jbutSetLangZhHansT.setBorderPainted(false);
+        jbutSetLangZhHansT.setFocusPainted(false);
+        jbutSetLangZhHansT.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jbutSetLangZhHansTActionPerformed(evt);
             }
         });
 
@@ -263,26 +752,29 @@ public class GUI extends javax.swing.JFrame {
             }
         });
 
-        jbutSetLangPtBr.setFont(new java.awt.Font("Tahoma", 0, 8)); // NOI18N
-        jbutSetLangPtBr.setIcon(new javax.swing.ImageIcon(getClass().getResource("/pt_BR.jpg"))); // NOI18N
-        jbutSetLangPtBr.setToolTipText(bundle.getString("GUI.jbutSetLangPtBr.toolTipText")); // NOI18N
-        jbutSetLangPtBr.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent evt) {
-                jbutSetLangPtBrActionPerformed(evt);
-            }
-        });
-
-        jbutSetLangIt.setFont(new java.awt.Font("Tahoma", 0, 8)); // NOI18N
-        jbutSetLangIt.setIcon(new javax.swing.ImageIcon(getClass().getResource("/it.jpg"))); // NOI18N
-        jbutSetLangIt.setToolTipText(bundle.getString("GUI.jbutSetLangIt.toolTipText")); // NOI18N
-        jbutSetLangIt.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent evt) {
-                jbutSetLangItActionPerformed(evt);
-            }
-        });
-
         jcbTrackName.setText(bundle.getString("GUI.jcbTrackName.text")); // NOI18N
         jcbTrackName.setToolTipText(bundle.getString("GUI.jcbTrackName.toolTipText")); // NOI18N
+        jcbTrackName.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jcbTrackNameActionPerformed(evt);
+            }
+        });
+
+        jcbTitle.setText(bundle.getString("GUI.jcbTitle.text")); // NOI18N
+        jcbTitle.setToolTipText(bundle.getString("GUI.jcbTitle.toolTipText")); // NOI18N
+        jcbTitle.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jcbTitleActionPerformed(evt);
+            }
+        });
+
+        jcbTiming.setText(bundle.getString("GUI.jcbTiming.text")); // NOI18N
+        jcbTiming.setToolTipText(bundle.getString("GUI.jcbTiming.toolTipText")); // NOI18N
+        jcbTiming.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jcbTimingActionPerformed(evt);
+            }
+        });
 
         jtTrackList.setModel(new TableModel(java.util.ResourceBundle.getBundle("Bundle"), true));
         jspTracks.setViewportView(jtTrackList);
@@ -293,313 +785,362 @@ public class GUI extends javax.swing.JFrame {
         jtTargetList.setModel(new TableModel(java.util.ResourceBundle.getBundle("Bundle"), false));
         jspTargets.setViewportView(jtTargetList);
 
-        jlSource.setLabelFor(jcmbSource);
-        jlSource.setText(bundle.getString("GUI.jlSource.text")); // NOI18N
+        jTabbedPane.addTab(bundle.getString("GUI.jspTargets.TabConstraints.tabTitle"), jspTargets); // NOI18N
 
-        javax.swing.GroupLayout jpTargetsLayout = new javax.swing.GroupLayout(jpTargets);
-        jpTargets.setLayout(jpTargetsLayout);
-        jpTargetsLayout.setHorizontalGroup(
-            jpTargetsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(jpTargetsLayout.createSequentialGroup()
-                .addContainerGap()
-                .addComponent(jlSource)
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addComponent(jcmbSource, javax.swing.GroupLayout.PREFERRED_SIZE, 168, javax.swing.GroupLayout.PREFERRED_SIZE))
-            .addComponent(jspTargets, javax.swing.GroupLayout.PREFERRED_SIZE, 592, javax.swing.GroupLayout.PREFERRED_SIZE)
-        );
-        jpTargetsLayout.setVerticalGroup(
-            jpTargetsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addGroup(jpTargetsLayout.createSequentialGroup()
-                .addContainerGap()
-                .addGroup(jpTargetsLayout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(jlSource)
-                    .addComponent(jcmbSource, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
-                .addComponent(jspTargets, javax.swing.GroupLayout.DEFAULT_SIZE, 124, Short.MAX_VALUE))
-        );
+        jtaLogs.setEditable(false);
+        jtaLogs.setColumns(20);
+        jtaLogs.setRows(5);
+        jspLogs.setViewportView(jtaLogs);
 
-        jlSource.getAccessibleContext().setAccessibleName(bundle.getString("GUI.jlSource.text")); // NOI18N
-
-        jTabbedPane.addTab(bundle.getString("GUI.jpTargets.TabConstraints.tabTitle"), jpTargets); // NOI18N
-
-        jbutSetLangZhHanS.setFont(new java.awt.Font("Tahoma", 0, 8)); // NOI18N
-        jbutSetLangZhHanS.setIcon(new javax.swing.ImageIcon(getClass().getResource("/zh_HanS.jpg"))); // NOI18N
-        jbutSetLangZhHanS.setToolTipText(bundle.getString("GUI.jbutSetLangZhHanS.toolTipText")); // NOI18N
-        jbutSetLangZhHanS.addActionListener(new java.awt.event.ActionListener() {
+        jbutHelp.setIcon(new javax.swing.ImageIcon(getClass().getResource("/help.png"))); // NOI18N
+        jbutHelp.setText(bundle.getString("GUI.jbutHelp.text")); // NOI18N
+        jbutHelp.setBorder(null);
+        jbutHelp.setBorderPainted(false);
+        jbutHelp.setContentAreaFilled(false);
+        jbutHelp.setFocusPainted(false);
+        jbutHelp.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
-                jbutSetLangZhHanSActionPerformed(evt);
+                jbutHelpActionPerformed(evt);
             }
         });
 
-        jbutSetLangZhHansT.setFont(new java.awt.Font("Tahoma", 0, 8)); // NOI18N
-        jbutSetLangZhHansT.setIcon(new javax.swing.ImageIcon(getClass().getResource("/zh_HanT.jpg"))); // NOI18N
-        jbutSetLangZhHansT.setToolTipText(bundle.getString("GUI.jbutSetLangZhHansT.toolTipText")); // NOI18N
-        jbutSetLangZhHansT.addActionListener(new java.awt.event.ActionListener() {
+        jbutWeb.setIcon(new javax.swing.ImageIcon(getClass().getResource("/web.png"))); // NOI18N
+        jbutWeb.setText(bundle.getString("GUI.jbutWeb.text")); // NOI18N
+        jbutWeb.setBorder(null);
+        jbutWeb.setBorderPainted(false);
+        jbutWeb.setContentAreaFilled(false);
+        jbutWeb.setFocusPainted(false);
+        jbutWeb.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
-                jbutSetLangZhHansTActionPerformed(evt);
+                jbutWebActionPerformed(evt);
             }
         });
+
+        jbutAbout.setIcon(new javax.swing.ImageIcon(getClass().getResource("/about.png"))); // NOI18N
+        jbutAbout.setText(bundle.getString("GUI.jbutAbout.text")); // NOI18N
+        jbutAbout.setBorder(null);
+        jbutAbout.setBorderPainted(false);
+        jbutAbout.setContentAreaFilled(false);
+        jbutAbout.setFocusPainted(false);
+        jbutAbout.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jbutAboutActionPerformed(evt);
+            }
+        });
+
+        jbutSetLangUk.setFont(new java.awt.Font("Tahoma", 0, 8)); // NOI18N
+        jbutSetLangUk.setIcon(new javax.swing.ImageIcon(getClass().getResource("/uk.jpg"))); // NOI18N
+        jbutSetLangUk.setToolTipText(bundle.getString("GUI.jbutSetLangUk.toolTipText")); // NOI18N
+        jbutSetLangUk.setBorder(null);
+        jbutSetLangUk.setBorderPainted(false);
+        jbutSetLangUk.setFocusPainted(false);
+        jbutSetLangUk.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jbutSetLangUkActionPerformed(evt);
+            }
+        });
+
+        jlProxy.setText(bundle.getString("GUI.jlProxy.text")); // NOI18N
+
+        jtfHostInput.setText(bundle.getString("GUI.jtfHostInput.text")); // NOI18N
+        jtfHostInput.setToolTipText(bundle.getString("GUI.jtfHostInput.toolTipText")); // NOI18N
+        jtfHostInput.setComponentPopupMenu(jpmContextual);
+        jtfHostInput.setName("ProxyHostInput"); // NOI18N
+        jtfHostInput.addMouseListener(new java.awt.event.MouseAdapter() {
+            public void mousePressed(java.awt.event.MouseEvent evt) {
+                jtfHostInputMousePressed(evt);
+            }
+        });
+
+        jspinnerPort.setModel(new javax.swing.SpinnerNumberModel(9150, 1, 65535, 1));
+        jspinnerPort.setToolTipText(bundle.getString("GUI.jspinnerPort.toolTipText")); // NOI18N
+        jspinnerPort.setName("ProxyPort"); // NOI18N
 
         javax.swing.GroupLayout layout = new javax.swing.GroupLayout(getContentPane());
         getContentPane().setLayout(layout);
         layout.setHorizontalGroup(
             layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(layout.createSequentialGroup()
+                .addContainerGap()
                 .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(jlStatus, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                    .addComponent(jTabbedPane)
+                    .addComponent(jspLogs)
                     .addGroup(layout.createSequentialGroup()
                         .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                             .addGroup(layout.createSequentialGroup()
-                                .addGap(169, 169, 169)
-                                .addComponent(jrbURL, javax.swing.GroupLayout.PREFERRED_SIZE, 78, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
-                                .addComponent(jrbXML, javax.swing.GroupLayout.PREFERRED_SIZE, 123, javax.swing.GroupLayout.PREFERRED_SIZE))
-                            .addGroup(layout.createSequentialGroup()
-                                .addContainerGap()
-                                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addGroup(layout.createSequentialGroup()
-                                        .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                            .addComponent(jlSubOut)
-                                            .addComponent(jlSubIn)
-                                            .addGroup(layout.createSequentialGroup()
-                                                .addComponent(jbutSetLangCa, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                                                .addComponent(jbutSetLangEn, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                                                .addComponent(jbutSetLangEs, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                                                .addComponent(jbutSetLangIt, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                                                .addComponent(jbutSetLangPtBr, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                                                .addComponent(jbutSetLangZhHanS, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)))
-                                        .addGap(1, 1, 1)
-                                        .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
-                                            .addGroup(layout.createSequentialGroup()
-                                                .addGap(5, 5, 5)
-                                                .addComponent(jbutSetLangZhHansT, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                                                .addComponent(jlDelay)
-                                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                                                .addComponent(jspinnerDelay, javax.swing.GroupLayout.PREFERRED_SIZE, 91, javax.swing.GroupLayout.PREFERRED_SIZE))
+                                .addComponent(jbutSetLangCa, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                .addComponent(jbutSetLangDe, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                .addComponent(jbutSetLangEn, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                .addComponent(jbutSetLangEs, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                .addComponent(jbutSetLangFr, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                .addComponent(jbutSetLangIt, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                .addComponent(jbutSetLangPl, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                .addComponent(jbutSetLangPtBr, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                .addComponent(jbutSetLangRu, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                .addComponent(jbutSetLangUk, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                .addComponent(jbutSetLangZhHanS, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                .addComponent(jbutSetLangZhHansT, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE))
+                            .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
+                                .addGroup(layout.createSequentialGroup()
+                                    .addComponent(jcbAll)
+                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                    .addComponent(jcbInvert)
+                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                    .addComponent(jcbTrackName)
+                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                                    .addComponent(jcbTitle)
+                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                                    .addComponent(jcbTiming)
+                                    .addGap(12, 12, 12)
+                                    .addComponent(jlProxy)
+                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                    .addComponent(jtfHostInput)
+                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                    .addComponent(jspinnerPort, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                                .addGroup(javax.swing.GroupLayout.Alignment.LEADING, layout.createSequentialGroup()
+                                    .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                        .addComponent(jlSubOut)
+                                        .addComponent(jlSubIn))
+                                    .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                        .addGroup(layout.createSequentialGroup()
+                                            .addGap(44, 44, 44)
+                                            .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                                                .addGroup(layout.createSequentialGroup()
+                                                    .addComponent(jlDelay, javax.swing.GroupLayout.PREFERRED_SIZE, 77, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                                    .addComponent(jspinnerDelay, javax.swing.GroupLayout.PREFERRED_SIZE, 91, javax.swing.GroupLayout.PREFERRED_SIZE))
+                                                .addComponent(jtfOutput, javax.swing.GroupLayout.PREFERRED_SIZE, 394, javax.swing.GroupLayout.PREFERRED_SIZE))
+                                            .addGap(18, 18, 18)
                                             .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                                .addComponent(jtfInput, javax.swing.GroupLayout.PREFERRED_SIZE, 332, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                                .addComponent(jtfOutput, javax.swing.GroupLayout.PREFERRED_SIZE, 332, javax.swing.GroupLayout.PREFERRED_SIZE))))
-                                    .addGroup(layout.createSequentialGroup()
-                                        .addComponent(jcbAll)
-                                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                                        .addComponent(jcbInvert)
-                                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                                        .addComponent(jcbTrackName)))))
-                        .addGap(18, 18, 18)
-                        .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                            .addComponent(jbutInput, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                            .addComponent(jbutConvert, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                            .addComponent(jbutOutput, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)))
-                    .addGroup(layout.createSequentialGroup()
-                        .addContainerGap()
-                        .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                            .addComponent(jlStatus, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                            .addComponent(jTabbedPane))))
+                                                .addComponent(jbutOutput, javax.swing.GroupLayout.PREFERRED_SIZE, 108, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                                .addComponent(jbutConvert, javax.swing.GroupLayout.PREFERRED_SIZE, 108, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                                        .addGroup(layout.createSequentialGroup()
+                                            .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                                .addGroup(layout.createSequentialGroup()
+                                                    .addGap(44, 44, 44)
+                                                    .addComponent(jtfInput, javax.swing.GroupLayout.PREFERRED_SIZE, 394, javax.swing.GroupLayout.PREFERRED_SIZE))
+                                                .addGroup(layout.createSequentialGroup()
+                                                    .addGap(48, 48, 48)
+                                                    .addComponent(jrbURL, javax.swing.GroupLayout.PREFERRED_SIZE, 78, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                                    .addComponent(jrbURLListXML, javax.swing.GroupLayout.PREFERRED_SIZE, 211, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                                            .addGap(18, 18, 18)
+                                            .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                                .addGroup(layout.createSequentialGroup()
+                                                    .addComponent(jbutHelp)
+                                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                                    .addComponent(jbutAbout)
+                                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                                    .addComponent(jbutWeb))
+                                                .addComponent(jbutInput, javax.swing.GroupLayout.PREFERRED_SIZE, 108, javax.swing.GroupLayout.PREFERRED_SIZE)))))))
+                        .addGap(0, 24, Short.MAX_VALUE)))
                 .addContainerGap())
         );
         layout.setVerticalGroup(
             layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(layout.createSequentialGroup()
                 .addContainerGap()
-                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(jrbURL)
-                    .addComponent(jrbXML))
-                .addGap(3, 3, 3)
                 .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addComponent(jlSubIn)
-                    .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                        .addComponent(jtfInput, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addComponent(jbutInput)))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(jtfOutput, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(jbutOutput)
-                    .addComponent(jlSubOut))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                        .addComponent(jlDelay)
-                        .addComponent(jspinnerDelay, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addComponent(jbutConvert))
-                    .addGroup(layout.createSequentialGroup()
+                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, layout.createSequentialGroup()
+                        .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                            .addComponent(jrbURL)
+                            .addComponent(jrbURLListXML))
+                        .addGap(19, 19, 19)
+                        .addComponent(jlSubIn)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                        .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                            .addComponent(jlSubOut)
+                            .addComponent(jtfOutput, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                         .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                             .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
-                                .addComponent(jbutSetLangPtBr, javax.swing.GroupLayout.PREFERRED_SIZE, 14, javax.swing.GroupLayout.PREFERRED_SIZE)
                                 .addComponent(jbutSetLangCa, javax.swing.GroupLayout.PREFERRED_SIZE, 14, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                .addComponent(jbutSetLangEs, javax.swing.GroupLayout.PREFERRED_SIZE, 14, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                .addComponent(jbutSetLangEn, javax.swing.GroupLayout.PREFERRED_SIZE, 14, javax.swing.GroupLayout.PREFERRED_SIZE)
                                 .addComponent(jbutSetLangIt, javax.swing.GroupLayout.PREFERRED_SIZE, 0, Short.MAX_VALUE))
                             .addComponent(jbutSetLangZhHanS, javax.swing.GroupLayout.PREFERRED_SIZE, 14, javax.swing.GroupLayout.PREFERRED_SIZE)
-                            .addComponent(jbutSetLangZhHansT, javax.swing.GroupLayout.PREFERRED_SIZE, 14, javax.swing.GroupLayout.PREFERRED_SIZE))
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                            .addComponent(jbutSetLangZhHansT, javax.swing.GroupLayout.PREFERRED_SIZE, 14, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(jbutSetLangPtBr, javax.swing.GroupLayout.PREFERRED_SIZE, 14, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(jbutSetLangPl, javax.swing.GroupLayout.PREFERRED_SIZE, 14, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(jbutSetLangFr, javax.swing.GroupLayout.PREFERRED_SIZE, 14, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(jbutSetLangEs, javax.swing.GroupLayout.PREFERRED_SIZE, 14, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(jbutSetLangDe, javax.swing.GroupLayout.PREFERRED_SIZE, 14, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(jbutSetLangEn, javax.swing.GroupLayout.PREFERRED_SIZE, 14, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(jbutSetLangRu, javax.swing.GroupLayout.PREFERRED_SIZE, 14, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(jbutSetLangUk, javax.swing.GroupLayout.PREFERRED_SIZE, 14, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                                .addComponent(jlDelay)
+                                .addComponent(jspinnerDelay, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                .addComponent(jbutConvert)))
+                        .addGap(16, 16, 16))
+                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, layout.createSequentialGroup()
+                        .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                            .addComponent(jbutHelp)
+                            .addComponent(jbutAbout)
+                            .addComponent(jbutWeb))
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                         .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                            .addComponent(jcbAll)
-                            .addComponent(jcbInvert)
-                            .addComponent(jcbTrackName))))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
-                .addComponent(jTabbedPane, javax.swing.GroupLayout.DEFAULT_SIZE, 194, Short.MAX_VALUE)
-                .addGap(1, 1, 1)
+                            .addComponent(jbutInput)
+                            .addComponent(jtfInput, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addComponent(jbutOutput)
+                        .addGap(47, 47, 47)))
+                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(jcbAll)
+                    .addComponent(jcbInvert)
+                    .addComponent(jcbTrackName)
+                    .addComponent(jcbTitle)
+                    .addComponent(jlProxy)
+                    .addComponent(jtfHostInput, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(jcbTiming)
+                    .addComponent(jspinnerPort, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(jTabbedPane, javax.swing.GroupLayout.DEFAULT_SIZE, 211, Short.MAX_VALUE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(jspLogs, javax.swing.GroupLayout.PREFERRED_SIZE, 94, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addComponent(jlStatus, javax.swing.GroupLayout.PREFERRED_SIZE, 18, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addContainerGap())
         );
 
+        jbutSetLangCa.getAccessibleContext().setAccessibleDescription(bundle.getString("GUI.jbutSetLangCa.toolTipText")); // NOI18N
+        jbutSetLangDe.getAccessibleContext().setAccessibleDescription(bundle.getString("GUI.jbutSetLangDe.toolTipText")); // NOI18N
+        jbutSetLangFr.getAccessibleContext().setAccessibleDescription(bundle.getString("GUI.jbutSetLangFr.toolTipText")); // NOI18N
+        jbutSetLangIt.getAccessibleContext().setAccessibleDescription(bundle.getString("GUI.jbutSetLangIt.toolTipText")); // NOI18N
+        jbutSetLangPl.getAccessibleContext().setAccessibleDescription(bundle.getString("GUI.jbutSetLangPl.toolTipText")); // NOI18N
+        jbutSetLangPtBr.getAccessibleContext().setAccessibleDescription(bundle.getString("GUI.jbutSetLangPtBr.toolTipText")); // NOI18N
+        jbutSetLangRu.getAccessibleContext().setAccessibleDescription(bundle.getString("GUI.jbutSetLangRu.toolTipText")); // NOI18N
+        jbutSetLangZhHanS.getAccessibleContext().setAccessibleDescription(bundle.getString("GUI.jbutSetLangZhHanS.toolTipText")); // NOI18N
+        jbutSetLangZhHansT.getAccessibleContext().setAccessibleDescription(bundle.getString("GUI.jbutSetLangZhHansT.toolTipText")); // NOI18N
         jTabbedPane.getAccessibleContext().setAccessibleName("");
 
         pack();
     }// </editor-fold>//GEN-END:initComponents
 
-    public static java.util.ResourceBundle getBundle() {
-        java.util.ResourceBundle b;
-        try {
-            b = java.util.ResourceBundle.getBundle("Bundle");
-        } catch (MissingResourceException e) {
-            b = java.util.ResourceBundle.getBundle("Bundle", new java.util.Locale("en"));
-        }
-        return b;
-    }
-    
-    private void setLanguage (String s) {  
-        
-        if (s == null)
-            bundle = java.util.ResourceBundle.getBundle("Bundle");
-        else
-            try { bundle = java.util.ResourceBundle.getBundle("Bundle_" + s); }
-            catch (Exception e) { bundle = java.util.ResourceBundle.getBundle("Bundle"); }
-
-
-        if (this.jrbURL.isSelected()) {
-            this.jbutInput.setText(bundle.getString("GUI.jbutInput.text"));
-            this.jbutInput.setToolTipText(bundle.getString("GUI.jbutInput.toolTipText"));
-        } else {
-            this.jbutInput.setText(bundle.getString("GUI.jbutInput.xmlfile.text"));
-            this.jbutInput.setToolTipText(bundle.getString("GUI.jbutInput.xmlfile.toolTipText"));
-        }
-
-        this.jlSubIn.setText(bundle.getString("GUI.jlSubIn.text"));
-        this.jlSubOut.setText(bundle.getString("GUI.jlSubOut.text"));
-        this.jlDelay.setText(bundle.getString("GUI.jlDelay.text"));
-        this.jbutOutput.setText(bundle.getString("GUI.jbutOutput.text"));
-        this.jbutOutput.setToolTipText(bundle.getString("GUI.jbutOutput.toolTipText"));
-        this.jbutConvert.setText(bundle.getString("GUI.jbutConvert.text"));
-        this.jbutConvert.setToolTipText(bundle.getString("GUI.jbutConvert.toolTipText"));
-        this.jtfInput.setToolTipText(bundle.getString("GUI.jtfInput.toolTipText"));
-        this.jtfOutput.setToolTipText(bundle.getString("GUI.jtfOutput.toolTipText"));
-        this.jrbXML.setText(bundle.getString("GUI.jrbXML.text"));
-        this.jrbXML.setToolTipText(bundle.getString("GUI.jrbXML.toolTipText"));
-        this.jrbURL.setText(bundle.getString("GUI.jrbURL.text"));
-        this.jrbURL.setToolTipText(bundle.getString("GUI.jrbURL.toolTipText"));
-        this.jspinnerDelay.setToolTipText(bundle.getString("GUI.jspinnerDelay.toolTipText"));
-        this.jcbInvert.setText(bundle.getString("GUI.jcbInvert.text"));
-        this.jcbInvert.setToolTipText(bundle.getString("GUI.jcbInvert.toolTipText"));
-        this.jcbAll.setText(bundle.getString("GUI.jcbAll.text"));
-        this.jcbAll.setToolTipText(bundle.getString("GUI.jcbAll.toolTipText"));
-        this.jcbTrackName.setText(bundle.getString("GUI.jcbTrackName.text"));
-        this.jcbTrackName.setToolTipText(bundle.getString("GUI.jcbTrackName.toolTipText"));
-        this.jmiCut.setText(bundle.getString("GUI.jmiCut.text"));
-        this.jmiCopy.setText(bundle.getString("GUI.jmiCopy.text"));
-        this.jmiPaste.setText(bundle.getString("GUI.jmiPaste.text"));
-        this.jTabbedPane.setTitleAt(0, bundle.getString("GUI.jspTracks.TabConstraints.tabTitle"));
-        this.jTabbedPane.setTitleAt(1, bundle.getString("GUI.jpTargets.TabConstraints.tabTitle"));
-        this.jlSource.setText(bundle.getString("GUI.jlSource.text"));
-
-        //setTableModels(this.tablemodelTracks, this.lSubsWithTranslations.get(0));
-        //this.jtLlistaSubtitols.setModel(tablemodelTracks);
-        
-        Object data[][];
-        if (this.tablemodelTracks != null)
-            data = this.tablemodelTracks.getData();
-        else
-            data = null;
-        this.tablemodelTracks = new TableModel(bundle, true);
-        if (!islSubsWithTranslationsNull()) {
-            List<NetSubtitle> _lSubs = this.lSubsWithTranslations.get(0);
-            if (_lSubs != null)
-            {
-                if (data != null)
-                    this.tablemodelTracks.init(_lSubs, data);
-                else
-                    this.tablemodelTracks.init(_lSubs);
-            }
-            
-        }
-        this.jtTrackList.setModel(tablemodelTracks);
-        
-        
-        //setTableModels(this.tablemodelTargets, this.lSubsWithTranslations.get(1));
-        //this.jtLlistaSubtitols.setModel(tablemodelTracks);
-        
-        Object dataTargets[][];
-        if (this.tablemodelTargets != null)
-            dataTargets = this.tablemodelTargets.getData();
-        else
-            dataTargets = null;
-        this.tablemodelTargets = new TableModel(bundle, false);
-        if (!islSubsWithTranslationsNull()) {
-            List<NetSubtitle> _lSubs = this.lSubsWithTranslations.get(1);
-            if (_lSubs != null)
-            {
-                if (dataTargets != null)
-                    this.tablemodelTargets.init(_lSubs, dataTargets);
-                else
-                    this.tablemodelTargets.init(_lSubs);
-            }
-            
-        }
-        
-        this.jtTargetList.setModel(tablemodelTargets);
-
-    }
-    
-    private boolean islSubsWithTranslationsNull()
-    {
-        List<List<NetSubtitle>> swt = this.lSubsWithTranslations;
-        return (swt == null || swt.size() < 2 ||
-                swt.get(0) == null ||  swt.get(0).isEmpty() ||
-                swt.get(1) == null ||  swt.get(1).isEmpty());
-    }
-     
-    
     private void jbutConvertActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jbutConvertActionPerformed
+        int totalSubtitlesSelected;
+        
+        if (!_controller.islSubsWithTranslationsNull()) {  // Tracks or targets
+            if (jTabbedPane.getSelectedIndex() == 0) { // Tracks
+                totalSubtitlesSelected = tmSubtitlesLists_getNumberSelectedTracks();
+                if (totalSubtitlesSelected > appSettings.getLargeNumberSelectedSubtitlesWarning()
+                        && !appManySelectedWarning(totalSubtitlesSelected))
+                    return;
+            } else if (jTabbedPane.getSelectedIndex() == 1) { // Targets
+                totalSubtitlesSelected = tmSubtitlesLists_getNumberSelectedTracks() * tmSubtitlesLists_getNumberSelectedTargets();
+                if (totalSubtitlesSelected > appSettings.getLargeNumberSelectedSubtitlesWarning()
+                        && !appManySelectedWarning(totalSubtitlesSelected))
+                    return;
+            }
+        }
+
+        // Disable certain controls to avoid user interaction
+        this.enableControls(false);
+        this.jcbAll.setSelected(false);
+        
+        appSettings.setOutput(jtfOutput.getText());
         
         new Thread(new Runnable() {
+            @Override
             public void run() {
-                convertSubtitles();
+
+                if (_controller.getGUI().jrbURL.isSelected()) { // Source: Single URL (network)
+                    if (_controller.islSubsWithTranslationsNull()) {
+                        _controller.processInputURL();
+                    }
+                }
+                
+                if ("".equals(appSettings.getOutput())) {
+                    appErrorBundleMessage("msg.outfile.not.specified");
+                    prepareNewConversion();
+                    return;
+                }
+
+                appStatusBundleMessage("msg.status.converting");
+                
+                if (_controller.islSubsWithTranslationsNull()) { // Source: XML file (no tracks / targets)
+                    _controller.convertSubtitlesXML();
+                } else {
+                    if (jTabbedPane.getSelectedIndex() == 0) { // Normal tracks
+                        _controller.convertSubtitlesTracks();
+                    } else if (jTabbedPane.getSelectedIndex() == 1) { // Translated tracks (target)
+                        _controller.convertSubtitlesTargets();
+                    }
+                }
             }
         }).start();
         
     }//GEN-LAST:event_jbutConvertActionPerformed
 
+
+    private void configureProxy() {
+        if (jtfHostInput.getText().trim().length() > 0) {   // Check if JTextField has any string
+            try {
+                InetAddress inetAddress = InetAddress.getByName(jtfHostInput.getText());  // Validating host
+                appSettings.setProxyHost(jtfHostInput.getText()); // No validation error, set up proxy in Settings
+                appSettings.setPort((Integer)jspinnerPort.getValue());
+            } catch (UnknownHostException e) {
+                if (appSettings.isProxySet()) {  // Remove previously configured proxy if exist
+                    appSettings.setProxyNull();
+                }
+                appErrorBundleMessage("msg.jtfHostInput.invalid.host.at.read");
+            } finally {
+                jtfHostInput.setToolTipText(bundle.getString("GUI.jtfHostInput.toolTipText"));
+            }
+        } else if (appSettings.isProxySet()) {
+            appSettings.setProxyNull();
+        }
+    }
+
     private void jbutInputActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jbutInputActionPerformed
         int returnVal;
-        
-        if (this.jrbXML.isSelected()) { // Method: XML file
-            returnVal = fc1.showOpenDialog(this.getParent());
-            if (returnVal == JFileChooser.APPROVE_OPTION)
-                jtfInput.setText(fc1.getSelectedFile().getAbsolutePath());
-        } else { // Method: URL
-            //retrieveSubtitles();
-            
+        String path;
+
+        if (this.jrbURLListXML.isSelected()) {  // Method: URL List / XML file
+                returnVal = fc1.showOpenDialog(this.getParent());
+            if (returnVal == JFileChooser.APPROVE_OPTION) {
+                configureProxy();
+                path = fc1.getSelectedFile().getAbsolutePath();
+                appSettings.setFileInput(path);
+                jtfInput.setText(path);
+                loadInputFile(path);
+            }
+        } else { // Method: Single URL
+            configureProxy();
+
+            appSettings.setURLInput(jtfInput.getText());
+
             this.enableControls(false);
+
             new Thread(new Runnable() {
+                @Override
                 public void run() {
-                    retrieveSubtitles();
+                    _controller.processInputURL();
                 }
             }).start();
-            
-        }
+        }           
     }//GEN-LAST:event_jbutInputActionPerformed
     
     private void jbutOutputActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jbutOutputActionPerformed
         int returnVal;
+        String path;
                 
         returnVal = fc2.showSaveDialog(this.getParent());
-        if (returnVal == JFileChooser.APPROVE_OPTION)
-            jtfOutput.setText(fc2.getSelectedFile().getAbsolutePath());
+        if (returnVal == JFileChooser.APPROVE_OPTION) {
+            path = fc2.getSelectedFile().getAbsolutePath();
+            jtfOutput.setText(path);
+            appSettings.setOutput(path);
+        }
     }//GEN-LAST:event_jbutOutputActionPerformed
 
     private void jbutSetLangCaActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jbutSetLangCaActionPerformed
@@ -618,6 +1159,21 @@ private void jtfInputFocusGained(java.awt.event.FocusEvent evt) {//GEN-FIRST:eve
     this.jtfInput.selectAll();
 }//GEN-LAST:event_jtfInputFocusGained
 
+
+
+    private void checkPortRange(java.awt.event.FocusEvent evt) {
+        JFormattedTextField tf = (JFormattedTextField)evt.getSource();
+        try {
+            if (Integer.parseInt(tf.getText()) < 1) {
+                jspinnerPort.setValue(new Integer(1));
+            } else if (Integer.parseInt(tf.getText()) > 65535) {
+                jspinnerPort.setValue(new Integer(65535));
+            }
+        } catch (NumberFormatException e) {
+
+        }
+    }
+
 private void jcbInvertActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jcbInvertActionPerformed
     int i;
     Object data[][];
@@ -629,21 +1185,18 @@ private void jcbInvertActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIR
         if (data == null) return;
         for (i = 0; i < data.length; i++)
             data[i][0] = !((Boolean) data[i][0]).booleanValue();
-        this.tablemodelTracks = new TableModel(bundle, true);
-        this.tablemodelTracks.init(lSubsWithTranslations.get(0), data);
-        this.jtTrackList.setModel(tablemodelTracks);
-        }
-    else if (this.jTabbedPane.getSelectedIndex() == 1)
+        this.tablemodelTracks.init(_controller.getTracks(), data);
+    }
+    else if (this.jTabbedPane.getSelectedIndex() == 1) // Translated tracks (targets)
     {
         this.jcbInvert.setSelected(false);
         data = this.tablemodelTargets.getData();
         if (data == null) return;
         for (i = 0; i < data.length; i++)
             data[i][0] = !((Boolean) data[i][0]).booleanValue();
-        this.tablemodelTargets = new TableModel(bundle, false);
-        this.tablemodelTargets.init(lSubsWithTranslations.get(1), data);
-        this.jtTargetList.setModel(tablemodelTargets);
+        this.tablemodelTargets.init(_controller.getTargets(), data);
     }
+    this.tmSubtitlesLists_width();
 }//GEN-LAST:event_jcbInvertActionPerformed
 
 private void jcbAllActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jcbAllActionPerformed
@@ -652,48 +1205,74 @@ private void jcbAllActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:
 
     if (this.jTabbedPane.getSelectedIndex() == 0) // Normal tracks
     {
+        this.jcbAll.setSelected(false);
+        _selectAllTracks = ! _selectAllTracks;
         data = this.tablemodelTracks.getData();
         if (data == null) return;
         for (i = 0; i < data.length; i++)
-            data[i][0] = this.jcbAll.isSelected();
-        this.tablemodelTracks = new TableModel(bundle, true);
-        this.tablemodelTracks.init(lSubsWithTranslations.get(0), data);
-        this.jtTrackList.setModel(tablemodelTracks);
+            data[i][0] = _selectAllTracks;
+        this.tablemodelTracks.init(_controller.getTracks(), data);
     }
     else if (this.jTabbedPane.getSelectedIndex() == 1) // Translated tracks (targets)
     {
+        this.jcbAll.setSelected(false);
+        _selectAllTargets = ! _selectAllTargets;
         data = this.tablemodelTargets.getData();
         if (data == null) return;
         for (i = 0; i < data.length; i++)
-            data[i][0] = this.jcbAll.isSelected();
-        this.tablemodelTargets = new TableModel(bundle, false);
-        this.tablemodelTargets.init(lSubsWithTranslations.get(1), data);
-        this.jtTargetList.setModel(tablemodelTargets);
+            data[i][0] = _selectAllTargets;
+        this.tablemodelTargets.init(_controller.getTargets(), data);
     }
+    this.tmSubtitlesLists_width();
 }//GEN-LAST:event_jcbAllActionPerformed
 
 private void jrbURLItemStateChanged(java.awt.event.ItemEvent evt) {//GEN-FIRST:event_jrbURLItemStateChanged
 
     if (evt.getStateChange() == java.awt.event.ItemEvent.SELECTED) {
-        defaultFile = this.jtfInput.getText();
-        this.jtfInput.setText(defaultURL);
+        appSettings.setFileInput(jtfInput.getText());
+        jtfInput.setText(appSettings.getURLInput());
+        jtfInput.setEditable(true);
 
-        this.jbutInput.setText(bundle.getString("GUI.jbutInput.text"));
-        this.jbutInput.setToolTipText(bundle.getString("GUI.jbutInput.toolTipText"));
+        jbutInput.setText(bundle.getString("GUI.jbutInput.text"));
+        jbutInput.setToolTipText(bundle.getString("GUI.jbutInput.toolTipText"));
+        
+        if (! appSettings.getURLInput().isEmpty()) {
+
+            configureProxy();
+
+            this.enableControls(false);
+
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    _controller.processInputURL();
+                }
+            }).start();
+        }
     }
 }//GEN-LAST:event_jrbURLItemStateChanged
 
-private void jrbXMLItemStateChanged(java.awt.event.ItemEvent evt) {//GEN-FIRST:event_jrbXMLItemStateChanged
+private void jrbURLListXMLItemStateChanged(java.awt.event.ItemEvent evt) {//GEN-FIRST:event_jrbURLListXMLItemStateChanged
 
     if (evt.getStateChange() == java.awt.event.ItemEvent.SELECTED) {
-        this.lSubsWithTranslations = new Vector<List<NetSubtitle>>(); this.lSubsWithTranslations.add(new Vector<NetSubtitle>()); this.lSubsWithTranslations.add(new Vector<NetSubtitle>());
-        defaultURL = this.jtfInput.getText();
-        this.jtfInput.setText(defaultFile);
+//        _controller.initSubtitlesDataStructure();
+//        this.tmSubtitlesLists_clear();
+//        this.tmSubtitlesLists_populate();
 
-        this.jbutInput.setText(bundle.getString("GUI.jbutInput.xmlfile.text"));
-        this.jbutInput.setToolTipText(bundle.getString("GUI.jbutInput.xmlfile.toolTipText"));
+        configureProxy();
+        
+        appSettings.setURLInput(jtfInput.getText());
+        jtfInput.setText(appSettings.getFileInput());
+        jtfInput.setEditable(false);
+
+        jbutInput.setText(bundle.getString("GUI.jbutInput.xmlfile.text"));
+        jbutInput.setToolTipText(bundle.getString("GUI.jbutInput.xmlfile.toolTipText"));
+        
+        if (! appSettings.getFileInput().isEmpty()) {
+            loadInputFile(appSettings.getFileInput());
+        }
     }
-}//GEN-LAST:event_jrbXMLItemStateChanged
+}//GEN-LAST:event_jrbURLListXMLItemStateChanged
 
 private void jtfInputMousePressed(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_jtfInputMousePressed
 
@@ -727,654 +1306,102 @@ private void jbutSetLangPtBrActionPerformed(java.awt.event.ActionEvent evt) {//G
         this.setLanguage("zh_HanT");
     }//GEN-LAST:event_jbutSetLangZhHansTActionPerformed
 
+    private void jbutSetLangPlActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jbutSetLangPlActionPerformed
+        this.setLanguage("pl");
+    }//GEN-LAST:event_jbutSetLangPlActionPerformed
 
-    
-    public static void main(String args[]) {
-        java.awt.EventQueue.invokeLater(new Runnable() {
-            public void run() {
-                new GUI().setVisible(true);
-            }
-        });
-    }
-    
-    private void showMsgInfileInvalidFormat() {
-        String msg;
-        
-        msg = bundle.getString("msg.infile.invalid.format");
-        jtfInput.requestFocusInWindow();
-        javax.swing.JOptionPane.showMessageDialog(null, msg);
-    }
-    
-    public void setMsgInfileInvalidFormat() {
-        this.msgInfileInvalidFormat = true;
-    }
+    private void jbutSetLangFrActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jbutSetLangFrActionPerformed
+        this.setLanguage("fr");
+    }//GEN-LAST:event_jbutSetLangFrActionPerformed
 
-    private void showMsgIOException() {
-        String msg;
+    private void jbutSetLangDeActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jbutSetLangDeActionPerformed
+        this.setLanguage("de");
+    }//GEN-LAST:event_jbutSetLangDeActionPerformed
 
-        msg = bundle.getString("msg.io.error");
-        jtfInput.requestFocusInWindow();
-        javax.swing.JOptionPane.showMessageDialog(null, msg);
-    }
-    
-    public void setMsgIOException() {
-        this.msgIOException = true;
-    }
-    
-    public void msgFileNoSubtitles() {
-        String msg;
+    private void jbutSetLangRuActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jbutSetLangRuActionPerformed
+        this.setLanguage("ru");
+    }//GEN-LAST:event_jbutSetLangRuActionPerformed
 
-        msg = bundle.getString("msg.infile.no.subtitles.found");
-        jtfInput.requestFocusInWindow();
-        javax.swing.JOptionPane.showMessageDialog(null, msg);
-    }
+    private void jcbTrackNameActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jcbTrackNameActionPerformed
+        appSettings.setIncludeTrackNameInFilename(jcbTrackName.isSelected());
+    }//GEN-LAST:event_jcbTrackNameActionPerformed
 
-    public void msgConversionOk() {
-        String msg;
+    private void jcbTitleActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jcbTitleActionPerformed
+        appSettings.setIncludeTitleInFilename(jcbTitle.isSelected());
+    }//GEN-LAST:event_jcbTitleActionPerformed
 
-        msg = bundle.getString("msg.conversion.done.ok");
-        jtfInput.requestFocusInWindow();
-        javax.swing.JOptionPane.showMessageDialog(null, msg);
-    }
-    
-    public void msgConversionFinished() { // conversion finished (either successfully or not)
-        String msg;
+    private void jbutAboutActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jbutAboutActionPerformed
+        _controller.showAbout();
+    }//GEN-LAST:event_jbutAboutActionPerformed
 
-        msg = bundle.getString("msg.conversion.finished");
-        jtfInput.requestFocusInWindow();
-        javax.swing.JOptionPane.showMessageDialog(null, msg);
-    }
-    
-    public void msgConversioErrors() {
-        String msg;
+    private void jbutHelpActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jbutHelpActionPerformed
+        _controller.showLocalHelp();
+    }//GEN-LAST:event_jbutHelpActionPerformed
 
-        msg = bundle.getString("msg.conversion.done.error");
-        jtfInput.requestFocusInWindow();
-        javax.swing.JOptionPane.showMessageDialog(null, msg);
-    }
-    
-    public void prepareNewConversion() {
-        this.enableControls(true);
-        this.jlStatus.setText("");
-        
-        if (this.msgIOException) this.showMsgIOException();
-        if (this.msgInfileInvalidFormat) this.showMsgInfileInvalidFormat();
-        
-        this.msgIOException = false;
-        this.msgInfileInvalidFormat = false;
-    }
-    
-    public void enableControls(boolean enable)
-    {
-        this.jbutConvert.setEnabled(enable);
-        this.jbutInput.setEnabled(enable);
-        this.jbutOutput.setEnabled(enable);
-        this.jrbURL.setEnabled(enable);
-        this.jrbXML.setEnabled(enable);
-        this.jcbAll.setEnabled(enable);
-        this.jcbInvert.setEnabled(enable);
-        this.jcbTrackName.setEnabled(enable);
-        this.jcmbSource.setEnabled(enable);
-        this.jtfInput.setEnabled(enable);
-        this.jtfOutput.setEnabled(enable);
-        this.jspinnerDelay.setEnabled(enable);
-        this.jtTrackList.setEnabled(enable);
-        this.jtTargetList.setEnabled(enable);
-    }
+    private void jbutWebActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jbutWebActionPerformed
+        _controller.visitWebsite();
+    }//GEN-LAST:event_jbutWebActionPerformed
 
-    public void retrieveSubtitles() {
-        String msg;
-        
-        this.lSubsWithTranslations = new Vector<List<NetSubtitle>>();
-        this.lSubsWithTranslations.add(new Vector<NetSubtitle>());
-        this.lSubsWithTranslations.add(new Vector<NetSubtitle>());
-        
-        this.jcbAll.setSelected(false);
+    private void jbutSetLangUkActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jbutSetLangUkActionPerformed
+        this.setLanguage("uk");
+    }//GEN-LAST:event_jbutSetLangUkActionPerformed
 
-       // Check if URL is valid
-        try {
-            this.jlStatus.setText(bundle.getString("msg.status.connecting"));
-            lSubsWithTranslations = Network.getSubtitlesWithTranslations(this.jtfInput.getText());
-            this.jlStatus.setText("");
-        } catch (Network.HostNoGV e) {
-            msg = bundle.getString("msg.url.unknown.host");
-            jtfInput.requestFocusInWindow();
-            javax.swing.JOptionPane.showMessageDialog(null, msg);
-            prepareNewConversion();
-            return;
-        } catch (Network.NoDocId e) {
-            msg = bundle.getString("msg.url.parameter.docid.not.found");
-            jtfInput.requestFocusInWindow();
-            javax.swing.JOptionPane.showMessageDialog(null, msg);
-            prepareNewConversion();
-            return;
-        } catch (Network.NoQuery e) {
-            msg = bundle.getString("msg.url.parameter.not.found");
-            jtfInput.requestFocusInWindow();
-            javax.swing.JOptionPane.showMessageDialog(null, msg);
-            prepareNewConversion();
-            return;
-        } catch (Network.InvalidDocId e) {
-            msg = bundle.getString("msg.url.parameter.docid.invalid");
-            jtfInput.requestFocusInWindow();
-            javax.swing.JOptionPane.showMessageDialog(null, msg);
-            prepareNewConversion();
-            return;
-        } catch (Network.NoSubs e) {
-            this.msgFileNoSubtitles();
-            prepareNewConversion();
-            return;
-        } catch (MalformedURLException e) {
-            msg = bundle.getString("msg.url.invalid.format");
-            jtfInput.requestFocusInWindow();
-            javax.swing.JOptionPane.showMessageDialog(null, msg);
-            prepareNewConversion();
-            return;
-        } catch (org.jdom.input.JDOMParseException e) {
-            msg = bundle.getString("msg.url.unexpected.format");
-            jtfInput.requestFocusInWindow();
-            javax.swing.JOptionPane.showMessageDialog(null, msg);
-            prepareNewConversion();
-            return;
-        } catch (java.net.UnknownHostException e) {
-            msg = bundle.getString("msg.net.unknown.host");
-            jtfInput.requestFocusInWindow();
-            javax.swing.JOptionPane.showMessageDialog(null, msg);
-            prepareNewConversion();
-            return;
-        } catch (java.io.FileNotFoundException e) {
-            msg = bundle.getString("msg.url.does.not.exist");
-            jtfInput.requestFocusInWindow();
-            javax.swing.JOptionPane.showMessageDialog(null, msg);
-            prepareNewConversion();
-        } catch (Network.NoYouTubeParamV e)
-        {
-            msg = bundle.getString("msg.net.missing.video.param");
-            jtfInput.requestFocusInWindow();
-            javax.swing.JOptionPane.showMessageDialog(null, msg);
-            prepareNewConversion();
-        } catch (Exception e) {
-            msg = bundle.getString("msg.unknown.error");
-            jtfInput.requestFocusInWindow();
-            javax.swing.JOptionPane.showMessageDialog(null, msg);
-            prepareNewConversion();
-            return;
+    private void jtfHostInputMousePressed(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_jtfHostInputMousePressed
+        if (evt.getButton() == java.awt.event.MouseEvent.BUTTON3) {
+            this.jtfHostInput.requestFocusInWindow();
         }
-        
-        // No problems found. Let's populate the GUI
-        this.tablemodelTracks = new TableModel(bundle, true);
-        this.jcmbSource.removeAllItems();
-        
-        if (!islSubsWithTranslationsNull()) {
-            Object data[][];
-            data = this.tablemodelTracks.getData();
-            if (data != null)
-                this.tablemodelTracks.init(lSubsWithTranslations.get(0), data);
-            else
-                this.tablemodelTracks.init(lSubsWithTranslations.get(0));
-            
-            for (NetSubtitle _ns : lSubsWithTranslations.get(0))
-                this.jcmbSource.addItem(_ns);
-        }
-        this.jtTrackList.setModel(this.tablemodelTracks);
-        
-        
-        this.tablemodelTargets = new TableModel(bundle, false);
-        if (!islSubsWithTranslationsNull()) {
-            Object data[][];
-            data = this.tablemodelTargets.getData();
-            if (data != null)
-                this.tablemodelTargets.init(lSubsWithTranslations.get(1), data);
-            else
-                this.tablemodelTargets.init(lSubsWithTranslations.get(1));
-        }
-        this.jtTargetList.setModel(this.tablemodelTargets);
-        
-        
-        prepareNewConversion();
+    }//GEN-LAST:event_jtfHostInputMousePressed
 
-    }
+    private void jcbTimingActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jcbTimingActionPerformed
+        appSettings.setRemoveTimingSubtitles(jcbTiming.isSelected());
+    }//GEN-LAST:event_jcbTimingActionPerformed
 
-    public void convertSubtitles()
-    {
-        String msg;
-        InputStreamReader input = null;
-        Converter conv;
-        boolean atLeastOneIsSelected = false;
-        Object data[][];
-        String fileName, s;
-        
-        // Disable certain controls to avoid user interaction
-        this.enableControls(false);
-        
-        if (! this.jrbURL.isSelected()) { // Source: XML file
-            if ("".equals(jtfInput.getText())) {
-                msg = bundle.getString("msg.infile.not.specified");
-                javax.swing.JOptionPane.showMessageDialog(null, msg);
-                jtfInput.requestFocusInWindow();
-                prepareNewConversion();
-                return;
-            }
-            try {
-                input = new InputStreamReader(new FileInputStream(jtfInput.getText()), "UTF-8");
-            } catch (FileNotFoundException ex) {
-                this.setMsgIOException();
-                prepareNewConversion();
-                return;
-            } catch (java.io.UnsupportedEncodingException ex) {
-                System.out.println("(DEBUG) encoding not supported");
-            }
-        } else { // Source: Network
-            if (islSubsWithTranslationsNull()) {
-                retrieveSubtitles();
-                return;
-            }
-        }
-        
-        if ("".equals(jtfOutput.getText())) {
-            msg = bundle.getString("msg.outfile.not.specified");
-            javax.swing.JOptionPane.showMessageDialog(null, msg);
-            jtfOutput.requestFocusInWindow();
-            prepareNewConversion();
-            return;
-        }
-
-        msg = bundle.getString("msg.status.converting");
-        this.jlStatus.setText(msg);
-        
-        if (input != null && islSubsWithTranslationsNull()) { // Source: XML file
-            conv = new Converter(this,
-                    input,
-                    jtfOutput.getText(),
-                    ((Double)jspinnerDelay.getValue()).doubleValue());
-            conv.run();
-            prepareNewConversion();
-            msgConversionFinished();
-        } else if (!islSubsWithTranslationsNull()) { // Source: Network
-
-            
-            int tabSelected = this.jTabbedPane.getSelectedIndex();
-            boolean fewSubsSkipped = false;
-
-            if (tabSelected == 0) { // Normal tracks
-                data = this.tablemodelTracks.getData();
-                List<NetSubtitle> _lSubs = this.lSubsWithTranslations.get(0);
-                
-                for (int i = 0; i < data.length; i++) {
-                    
-                    if (((Boolean) data[i][0]).booleanValue()) {
-                        atLeastOneIsSelected = true;
-                        try {
-                            // When handling tracks, it is worth to try signature method FOR EACH track,
-                            // even when a previous track retrieval via signature method failed
-                            if (Network.getMagicURL().isEmpty()) throw new Exception("No *Magic* URL!");
-                            Network.setMethod(NetSubtitle.Method.YouTubeSignature);
-                            input = Network.readURL(_lSubs.get(i).getTrackURL());
-                        } catch (Exception ex1) {
-                            System.out.println("(DEBUG) URL could not be read via Signature method...");
-                            System.out.println(
-                                String.format("(DEBUG) Method=%s, Type=%s, ID=%s, IDXML=%s, Lang=%s, Name=%s, Exception message='%s'",
-                                    Network.getMethod(),
-                                    _lSubs.get(i).getType(),
-                                    _lSubs.get(i).getId(),
-                                    _lSubs.get(i).getIdXML(),
-                                    _lSubs.get(i).getLang(),
-                                    _lSubs.get(i).getName(),
-                                    ex1.getMessage()));
-                            
-                            if (_lSubs.get(i).getType() == NetSubtitle.Tipus.YouTubeASRTrack)
-                            {
-                                // YouTube ASR cannot be retrieved by using Legacy method.
-                                System.out.println("(DEBUG) YouTube ASR cannot be retrieved via Legacy method. Operation partially aborted.");
-                                System.out.println(
-                                    String.format("(DEBUG) Method=%s, Type=%s, ID=%s, IDXML=%s, Lang=%s, Name=%s",
-                                        Network.getMethod(),
-                                        _lSubs.get(i).getType(),
-                                        _lSubs.get(i).getId(),
-                                        _lSubs.get(i).getIdXML(),
-                                        _lSubs.get(i).getLang(),
-                                        _lSubs.get(i).getName()));
-
-                                fewSubsSkipped = true;
-                                continue;
-                            } else if (_lSubs.get(i).getType() == NetSubtitle.Tipus.YouTubeTrack)
-                            {
-                                // A YouTube track/target can be retrieved by using legacy method.
-                                // However, GUI should not reach this point with a target
-                                System.out.println("(DEBUG) Switching to YouTube Legacy mode and retrying...");
-                                Network.setMethod(NetSubtitle.Method.YouTubeLegacy);
-
-                                try
-                                {
-                                    input = Network.readURL(_lSubs.get(i).getTrackURL(NetSubtitle.Method.YouTubeLegacy));
-                                } catch (Exception ex2) {
-                                    System.out.println("(DEBUG) URL could not be read with Legacy method. Operation partially aborted");
-                                    System.out.println(
-                                        String.format("(DEBUG) Method=%s, Type=%s, ID=%s, IDXML=%s, Lang=%s, Name=%s, Exception message='%s'",
-                                            Network.getMethod(),
-                                            _lSubs.get(i).getType(),
-                                            _lSubs.get(i).getId(),
-                                            _lSubs.get(i).getIdXML(),
-                                            _lSubs.get(i).getLang(),
-                                            _lSubs.get(i).getName(),
-                                            ex2.getMessage()));
-
-                                    fewSubsSkipped = true;
-                                    continue;
-                                }
-                            } else 
-                            {
-                                // YouTube Target should not reach this point due to GUI.
-                                // Google Track should not reach this point.
-                                System.out.println("(DEBUG) Entered wrong section of code. Unexpected result.");
-                                fewSubsSkipped = true;
-                                continue;
-                            }
-                        }
-                        
-                        fileName = "_" + _lSubs.get(i).getId();
-                        fileName += "_" + _lSubs.get(i).getIdXML();
-
-                        if (jcbTrackName.isSelected()) {
-                            s = _lSubs.get(i).getName();
-                            if (s != null)
-                                fileName += "_" + s;
-                        }
-                        
-                        s = _lSubs.get(i).getLang();
-                        if (s != null)
-                            fileName += "_" + s;
-
-                        fileName += ".srt";
-                        
-
-                        conv = new Converter(
-                            this,
-                            input,
-                            Common.removeExtension(jtfOutput.getText()) + fileName,
-                            ((Double)jspinnerDelay.getValue()).doubleValue());
-                        if (!conv.run()) 
-                        {
-                            // Conversion failed
-                            // If Signature method was used and type is Track, let's retry
-                            // Otherwise, operation is partially aborted
-                            if (Network.getMethod() == NetSubtitle.Method.YouTubeSignature && 
-                                    _lSubs.get(i).getType() == NetSubtitle.Tipus.YouTubeTrack)
-                            {
-                                // A YouTube track/target can be retrieved by using legacy method.
-                                System.out.println("(DEBUG) Switching to YouTube Legacy mode and retrying...");
-                                Network.setMethod(NetSubtitle.Method.YouTubeLegacy);
-
-                                try
-                                {
-                                    input = Network.readURL(_lSubs.get(i).getTrackURL(NetSubtitle.Method.YouTubeLegacy));
-                                } catch (Exception ex1) {
-                                    System.out.println("(DEBUG) URL could not be read with Legacy method. Operation partially aborted");
-                                    System.out.println(
-                                        String.format("(DEBUG) Method=%s, Type=%s, ID=%s, IDXML=%s, Lang=%s, Name=%s, Exception message='%s'",
-                                            Network.getMethod(),
-                                            _lSubs.get(i).getType(),
-                                            _lSubs.get(i).getId(),
-                                            _lSubs.get(i).getIdXML(),
-                                            _lSubs.get(i).getLang(),
-                                            _lSubs.get(i).getName(),
-                                            ex1.getMessage()));
-
-                                    fewSubsSkipped = true;
-                                    continue;
-                                }
-                                
-                                conv = new Converter(
-                                    this,
-                                    input,
-                                    Common.removeExtension(jtfOutput.getText()) + fileName,
-                                    ((Double)jspinnerDelay.getValue()).doubleValue());
-                                
-                                conv.run();
-                            }
-                        }
-                    }
-
-                }
-                if (! atLeastOneIsSelected) { // there is no selection
-                    prepareNewConversion();
-                    msg = bundle.getString("msg.sublist.none.selected");
-                    javax.swing.JOptionPane.showMessageDialog(null, msg);
-                } else { // there is selection and the process ended (either successfully or not)
-                    prepareNewConversion();
-                    
-                    if (fewSubsSkipped) {
-                        msg = bundle.getString("msg.io.cc.unreadable");
-                        javax.swing.JOptionPane.showMessageDialog(null, msg);
-                    } else
-                    {
-                        msgConversionFinished();
-                    }
-                }
-            } else if (tabSelected == 1) { // Translated tracks (target)
-                data = this.tablemodelTargets.getData();
-                List<NetSubtitle> _lSubs = this.lSubsWithTranslations.get(1);
-                
-                NetSubtitle srcLang = (NetSubtitle)this.jcmbSource.getSelectedItem();
-                
-                // If the source is an ASR track and we cannot use Signature method, operation must be completely aborted
-                if (srcLang.getType() == NetSubtitle.Tipus.YouTubeASRTrack && Network.getMagicURL().isEmpty())
-                {
-                    System.out.println("(DEBUG) YouTube ASR cannot be retrieved via Legacy method. Operation completely aborted.");
-                    System.out.println(
-                        String.format("(DEBUG) [SOURCE] Method=%s, Type=%s, ID=%s, IDXML=%s, Lang=%s, Name=%s",
-                            Network.getMethod(),
-                            srcLang.getType(),
-                            srcLang.getId(),
-                            srcLang.getIdXML(),
-                            srcLang.getLang(),
-                            srcLang.getName()));
-
-                    msg = bundle.getString("msg.io.asr.unreadable");
-                    javax.swing.JOptionPane.showMessageDialog(null, msg);
-                    prepareNewConversion();
-                    return;
-                }
-                
-                for (int i = 0; i < data.length; i++) {
-
-                    if (((Boolean) data[i][0]).booleanValue()) {
-                        atLeastOneIsSelected = true;
-                        try {
-                            // When handling targets, it is worth to try signature method FOR EACH target,
-                            // even when a previous track retrieval via signature method failed
-                            // ASR source has already been discarded if *Magic* URL was not available
-                            
-                            if (Network.getMagicURL().isEmpty()) throw new Exception("No *Magic* URL!");
-                            Network.setMethod(NetSubtitle.Method.YouTubeSignature);
-                            input = Network.readURL(_lSubs.get(i).getTargetURL(srcLang));
-                        } catch (Exception ex1) {
-                            System.out.println("(DEBUG) URL could not be read... ");
-                            System.out.println(
-                                String.format("(DEBUG) [TARGET] Method=%s, Type=%s, ID=%s, IDXML=%s, Lang=%s, Name=%s, Exception message='%s'",
-                                    Network.getMethod(),
-                                    _lSubs.get(i).getType(),
-                                    _lSubs.get(i).getId(),
-                                    _lSubs.get(i).getIdXML(),
-                                    _lSubs.get(i).getLang(),
-                                    _lSubs.get(i).getName(),
-                                    ex1.getMessage()));
-                            
-
-                            if (srcLang.getType() == NetSubtitle.Tipus.YouTubeASRTrack)
-                            {
-                                // YouTube ASR targets cannot be retrieved by using Legacy method.
-                                System.out.println("(DEBUG) YouTube targets translated from ASR cannot be retrieved via Legacy method. Operation partially aborted.");
-                                System.out.println(
-                                    String.format("(DEBUG) [TARGET] Method=%s, Type=%s, ID=%s, IDXML=%s, Lang=%s, Name=%s",
-                                        Network.getMethod(),
-                                        _lSubs.get(i).getType(),
-                                        _lSubs.get(i).getId(),
-                                        _lSubs.get(i).getIdXML(),
-                                        _lSubs.get(i).getLang(),
-                                        _lSubs.get(i).getName()));
-
-                                fewSubsSkipped = true;
-                                continue;
-                            } else if (srcLang.getType() == NetSubtitle.Tipus.YouTubeTrack)
-                            {
-                                // NOTE: In order if it is worth to use legacy mode, we check the SOURCE (ASR or normal track)
-                                // A YouTube track/target can be retrieved by using legacy method.
-                                System.out.println("(DEBUG) Switching to YouTube Legacy mode and retrying...");
-                                Network.setMethod(NetSubtitle.Method.YouTubeLegacy);
-
-                                try
-                                {
-                                    input = Network.readURL(_lSubs.get(i).getTargetURL(NetSubtitle.Method.YouTubeLegacy, srcLang));
-                                } catch (Exception ex2) {
-                                    System.out.println("(DEBUG) URL could not be read with legacy method. Operation partially aborted");
-                                    System.out.println(
-                                        String.format("(DEBUG) [TARGET] Method=%s, Type=%s, ID=%s, IDXML=%s, Lang=%s, Name=%s, Exception message='%s'",
-                                            Network.getMethod(),
-                                            _lSubs.get(i).getType(),
-                                            _lSubs.get(i).getId(),
-                                            _lSubs.get(i).getIdXML(),
-                                            _lSubs.get(i).getLang(),
-                                            _lSubs.get(i).getName(),
-                                            ex2.getMessage()));
-                                    fewSubsSkipped = true;
-                                    continue;
-                                }
-                            } else
-                            {
-                                // YouTube Track should not reach this point due to GUI.
-                                // Google Track should not reach this point.
-                                System.out.println("(DEBUG) Entered wrong section of code. Unexpected result.");
-                                fewSubsSkipped = true;
-                                continue;
-                            }
-                        }
-                        
-                        fileName = "_" + srcLang.getId();
-                        fileName += "_" + _lSubs.get(i).getIdXML();
-                        
-                        s = _lSubs.get(i).getLang();
-                        if (s != null)
-                            fileName += "_" + s;
-                        
-                        
-                        fileName += "_" + srcLang.getIdXML();
-                        
-                        if (jcbTrackName.isSelected()) {
-                            s = srcLang.getName();
-                            if (s != null)
-                                fileName += "_" + s;
-                        }
-                        
-                        s = srcLang.getLang();
-                        if (s != null)
-                            fileName += "_" + s;
-
-                        fileName += ".srt";
-
-                        conv = new Converter(
-                            this,
-                            input,
-                            Common.removeExtension(jtfOutput.getText()) + fileName,
-                            ((Double)jspinnerDelay.getValue()).doubleValue());
-
-                        if (!conv.run()) 
-                        {
-                            // Conversion failed
-                            // If Signature method was used and SOURCE type is Track, let's retry
-                            // Otherwise, operation is partially aborted
-                            if (Network.getMethod() == NetSubtitle.Method.YouTubeSignature && 
-                                    srcLang.getType() == NetSubtitle.Tipus.YouTubeTrack)
-                            {
-                                // A YouTube track/target can be retrieved by using legacy method.
-                                System.out.println("(DEBUG) Switching to YouTube Legacy mode and retrying...");
-                                Network.setMethod(NetSubtitle.Method.YouTubeLegacy);
-
-                                try
-                                {
-                                    input = Network.readURL(_lSubs.get(i).getTargetURL(NetSubtitle.Method.YouTubeLegacy, srcLang));
-                                } catch (Exception ex1) {
-                                    System.out.println("(DEBUG) URL could not be read with Legacy method. Operation partially aborted");
-                                    System.out.println(
-                                        String.format("(DEBUG) Method=%s, Type=%s, ID=%s, IDXML=%s, Lang=%s, Name=%s, Exception message='%s'",
-                                            Network.getMethod(),
-                                            _lSubs.get(i).getType(),
-                                            _lSubs.get(i).getId(),
-                                            _lSubs.get(i).getIdXML(),
-                                            _lSubs.get(i).getLang(),
-                                            _lSubs.get(i).getName(),
-                                            ex1.getMessage()));
-
-                                    fewSubsSkipped = true;
-                                    continue;
-                                }
-                                
-                                conv = new Converter(
-                                    this,
-                                    input,
-                                    Common.removeExtension(jtfOutput.getText()) + fileName,
-                                    ((Double)jspinnerDelay.getValue()).doubleValue());
-                                
-                                conv.run();
-                            }
-                        }
-                    }
-
-                }
-                if (! atLeastOneIsSelected) { // there is no selection
-                    prepareNewConversion();
-                    msg = bundle.getString("msg.sublist.none.selected");
-                    javax.swing.JOptionPane.showMessageDialog(null, msg);
-                } else { // there is selection and the process ended (successfully or not)
-                    
-                    prepareNewConversion();
-                    
-                    if (fewSubsSkipped) {
-                        msg = bundle.getString("msg.io.cc.unreadable");
-                        javax.swing.JOptionPane.showMessageDialog(null, msg);
-                    } else
-                    {
-                        msgConversionFinished();
-                    }
-                }
-                
-            }
-        }
-    }
     
     // Variables declaration - do not modify//GEN-BEGIN:variables
     private javax.swing.JTabbedPane jTabbedPane;
+    private javax.swing.JButton jbutAbout;
     private javax.swing.JButton jbutConvert;
+    private javax.swing.JButton jbutHelp;
     private javax.swing.JButton jbutInput;
     private javax.swing.JButton jbutOutput;
     private javax.swing.JButton jbutSetLangCa;
+    private javax.swing.JButton jbutSetLangDe;
     private javax.swing.JButton jbutSetLangEn;
     private javax.swing.JButton jbutSetLangEs;
+    private javax.swing.JButton jbutSetLangFr;
     private javax.swing.JButton jbutSetLangIt;
+    private javax.swing.JButton jbutSetLangPl;
     private javax.swing.JButton jbutSetLangPtBr;
+    private javax.swing.JButton jbutSetLangRu;
+    private javax.swing.JButton jbutSetLangUk;
     private javax.swing.JButton jbutSetLangZhHanS;
     private javax.swing.JButton jbutSetLangZhHansT;
+    private javax.swing.JButton jbutWeb;
     private javax.swing.JCheckBox jcbAll;
     private javax.swing.JCheckBox jcbInvert;
+    private javax.swing.JCheckBox jcbTiming;
+    private javax.swing.JCheckBox jcbTitle;
     private javax.swing.JCheckBox jcbTrackName;
-    private javax.swing.JComboBox jcmbSource;
     private javax.swing.JLabel jlDelay;
-    private javax.swing.JLabel jlSource;
+    private javax.swing.JLabel jlProxy;
     private javax.swing.JLabel jlStatus;
     private javax.swing.JLabel jlSubIn;
     private javax.swing.JLabel jlSubOut;
     private javax.swing.JMenuItem jmiCopy;
     private javax.swing.JMenuItem jmiCut;
     private javax.swing.JMenuItem jmiPaste;
-    private javax.swing.JPanel jpTargets;
     private javax.swing.JPopupMenu jpmContextual;
     private javax.swing.JRadioButton jrbURL;
-    private javax.swing.JRadioButton jrbXML;
+    private javax.swing.JRadioButton jrbURLListXML;
+    private javax.swing.JScrollPane jspLogs;
     private javax.swing.JScrollPane jspTargets;
     private javax.swing.JScrollPane jspTracks;
     private javax.swing.JSpinner jspinnerDelay;
+    private javax.swing.JSpinner jspinnerPort;
     private javax.swing.JTable jtTargetList;
     private javax.swing.JTable jtTrackList;
+    private javax.swing.JTextArea jtaLogs;
+    private javax.swing.JTextField jtfHostInput;
     private javax.swing.JTextField jtfInput;
     private javax.swing.JTextField jtfOutput;
     private javax.swing.ButtonGroup subsSource;

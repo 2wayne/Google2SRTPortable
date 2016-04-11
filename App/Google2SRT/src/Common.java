@@ -18,10 +18,29 @@
 /**
  *
  * @author kom
- * @version "0.6, 08/11/13"
+ * @version "0.7, 10/27/14"
  */
 
+import java.io.File;
+
 public class Common {
+    
+    enum tLanguage {ca, de, en, es, fr, it, pl, pt_BR, ru, uk, zh_HanS, zh_HanT};
+    
+    public static boolean isSupportedLanguage(String language) {
+        boolean isSupported = false;
+        
+        try {
+            if (tLanguage.valueOf(language) != null) {
+                isSupported = true;
+            }
+        } catch (Exception e) {
+            isSupported = false;
+        }
+        
+        return isSupported;
+    }
+    
     public static String getExtension(String filename) {
         String extension;
         int i;
@@ -46,5 +65,23 @@ public class Common {
             noExtension = filename.substring(0, i);
         
         return noExtension;
+    }
+    
+    public static String returnDirectory(String path) {
+        return (path.endsWith(File.separator)) ? path : path + File.separator;
+    }
+    
+    public static String removaInvalidFileNameChars(String filenameCandidate) {
+        return (filenameCandidate != null) ?
+                filenameCandidate.
+                    replace("\\", "_").
+                    replace("/", "_").
+                    replace(":", "_").
+                    replace("*", "_").
+                    replace("?", "_").
+                    replace("\"", "_").
+                    replace("<", "_").
+                    replace(">", "_").
+                    replace("|", "_") : null;
     }
 }

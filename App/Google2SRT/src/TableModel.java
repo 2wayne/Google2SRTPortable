@@ -18,14 +18,14 @@
 /**
  *
  * @author kom
- * @version "0.6, 08/11/13"
+ * @version "0.7, 10/27/14"
  */
 
 import java.util.List;
 import javax.swing.table.AbstractTableModel;
 
 public class TableModel extends AbstractTableModel {
-        private final String[] columnNamesWithTrackNames = {"Convert?", "Language code", "Language name", "Track name"};
+        private final String[] columnNamesWithTrackNames = {"Convert?", "Language code", "Language name", "Track name", "Video", "Title"};
         private final String[] columnNamesWithoutTrackNames = {"Convert?", "Language code", "Language name"};
         private java.util.ResourceBundle bundle;
         private boolean isWithTrackNames;
@@ -47,24 +47,38 @@ public class TableModel extends AbstractTableModel {
 
         public void setData(Object[][] dades) {
             this.data = dades;
+            fireTableDataChanged();
         }
 
-        public void setBundle(java.util.ResourceBundle bundle) {
+        public void setBundle(java.util.ResourceBundle bundle, javax.swing.JTable jt) {
             this.bundle = bundle;
+            updateColumnNames(jt);
+        }
+        
+        private void updateColumnNames(javax.swing.JTable jt) {
+           javax.swing.table.TableColumnModel tcm;
+           javax.swing.table.TableColumn tc;
+           
+           tcm = jt.getColumnModel();
+           
+           for (int i = 0; i < tcm.getColumnCount(); i++) {
+               tc = tcm.getColumn(i);
+               tc.setHeaderValue(getColumnName(i));
+           }
         }
 
-        public void init(List<NetSubtitle> llista) {
+        public void init(List<NetSubtitle> subList) {
             int i;
             NetSubtitle ns;
             String s;
             NetSubtitle.Tipus t;
 
-            this.list = llista;
+            this.list = subList;
             
             if (this.isWithTrackNames)
-                this.data = new Object[llista.size()][columnNamesWithTrackNames.length];
+                this.data = new Object[subList.size()][columnNamesWithTrackNames.length];
             else
-                this.data = new Object[llista.size()][columnNamesWithoutTrackNames.length];
+                this.data = new Object[subList.size()][columnNamesWithoutTrackNames.length];
 
             
             if (this.list.size() == 1) {
@@ -72,6 +86,7 @@ public class TableModel extends AbstractTableModel {
                 this.data[0][0] = true;                 // checkbox
                 this.data[0][1] = ns.getLang();         // lang code
                 this.data[0][2] = ns.getLangOriginal(); // lang name
+
                 
                 if (this.isWithTrackNames) {
                     s = ns.getName();              // track name (optional)
@@ -92,6 +107,8 @@ public class TableModel extends AbstractTableModel {
                                 this.data[0][3] = s;
                         }
                     }
+                    this.data[0][4] = ns.getId();           // video ID
+                    this.data[0][5] = ns.getTitle();        // video title
                 }
             } else
                 for (i = 0; i < this.list.size(); i++) {
@@ -120,13 +137,24 @@ public class TableModel extends AbstractTableModel {
                                     this.data[i][3] = s;
                             }
                         }
+
+                        this.data[i][4] = ns.getId();           // video ID
+                        this.data[i][5] = ns.getTitle();        // video title
                     }
                 }
+            
+            fireTableDataChanged();
         }
 
         public void init(List<NetSubtitle> list, Object[][] data) {
             this.list = list;
             this.data = data;
+            
+            fireTableDataChanged();
+        }
+        
+        public void clear() {
+            init(new java.util.ArrayList<NetSubtitle>());
         }
 
       

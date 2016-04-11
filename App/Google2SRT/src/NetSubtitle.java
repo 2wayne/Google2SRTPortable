@@ -18,7 +18,7 @@
 /**
  *
  * @author kom
- * @version "0.6, 08/11/13"
+ * @version "0.7.5, 03/06/16"
  */
 
 import java.io.UnsupportedEncodingException;
@@ -44,15 +44,22 @@ public class NetSubtitle {
     private String name = "",           // track name
             lang = "",                  // language code
             langOriginal = "",          // language name (untranslated)
-            langTranslated = "",        // language name (translated)
-            id = null;                  // "docid" (Google Video) o "v" (YouTube)
+            langTranslated = "";        // language name (translated)
     private int idXML = -1;             // attribute "id" in XML subs list
     private boolean isDefault;          // attribute "default" in XML subs list
     private boolean isTrack = false;    // is Track or Target?
     
+    /* *** IMPORTANT NOTE ***
+     * Targets DO NOT use its parent video to generate the URL.
+     * Current implementation (v0.7) generates all targets (translations/languages) for ONE requested video.
+     * Therefore, these targets (translations/languages) are reused to get subtitles for other videos.
+     * 
+    */
+    private Video video;                // Video (parent/owner this subtitle)
     
-    public NetSubtitle() {
+    public NetSubtitle(Video video) {
         this.isDefault = false; // All but one are "default"
+        this.video = video;
     }
     
     public void setType(Tipus type) {
@@ -67,8 +74,8 @@ public class NetSubtitle {
         this.lang = lang;
     }
     
-    public void setId(String id) {
-        this.id = id;
+    public void setVideo(Video video) {
+        this.video = video;
     }
     
     public void setLangTranslated(String langTrans) {
@@ -103,8 +110,17 @@ public class NetSubtitle {
         return this.lang;
     }
     
+    public Video getVideo() {
+        return this.video;
+    }
+    
     public String getId() {
-        return this.id;
+        // Legacy method
+        return this.video.getId();
+    }
+    
+    public String getTitle() {
+        return this.video.getTitle();
     }
     
     public boolean isDefault() {
@@ -159,13 +175,12 @@ public class NetSubtitle {
         {
             try
             {
-                //Network.setMethod(Method.YouTubeSignature);
-                s = getTrackURL(Network.getMethod());
+                s = getTrackURL(video.getMethod());
                 return s;
             }
             catch (Exception e) {
-                Network.setMethod(Method.YouTubeLegacy);
-                s = getTrackURL(Network.getMethod());                
+                video.setMethod(Method.YouTubeLegacy);
+                s = getTrackURL(video.getMethod());                
                 return s;
             }
         }
@@ -181,18 +196,18 @@ public class NetSubtitle {
                 s = "http://video.google.com/videotranscript?frame=c&type=track&" +
                         "name=" + URLEncoder.encode(this.name, "UTF-8") +
                         "&lang=" + URLEncoder.encode(this.lang, "UTF-8") +
-                        "&docid=" + URLEncoder.encode(this.id, "UTF-8");
-                System.out.println("(DEBUG) Track URL: " + s);
+                        "&docid=" + URLEncoder.encode(this.getId(), "UTF-8");
+                if (Settings.DEBUG) System.out.println("(DEBUG) Track URL: " + s);
                 return s;
             case YouTubeLegacy:
                 s = "http://video.google.com/timedtext?type=track&" +
                         "name=" + URLEncoder.encode(this.name, "UTF-8") +
                         "&lang=" + URLEncoder.encode(this.lang, "UTF-8") +
-                        "&v=" + URLEncoder.encode(this.id, "UTF-8");
-                System.out.println("(DEBUG) Track URL (Legacy): " + s);
+                        "&v=" + URLEncoder.encode(this.getId(), "UTF-8");
+                if (Settings.DEBUG) System.out.println("(DEBUG) Track URL (Legacy): " + s);
                 return s;
             case YouTubeSignature:        
-                params = Network.getParams();
+                params = video.getParams();
                 s = "https://www.youtube.com/api/timedtext" +
                        "?key=" + params.get("key") +
                        "&expire=" + params.get("expire") +
@@ -203,18 +218,18 @@ public class NetSubtitle {
                         
                        "&name=" + URLEncoder.encode(this.name, "UTF-8") +
                        "&lang=" + URLEncoder.encode(this.lang, "UTF-8") +
-                       "&v=" + URLEncoder.encode(this.id, "UTF-8") +
+                       "&v=" + URLEncoder.encode(this.getId(), "UTF-8") +
                         
                        "&type=track";
                 
                 if (NetSubtitle.Tipus.YouTubeASRTrack.equals(this.type))
                 {
                     s += "&kind=asr";
-                    System.out.println("(DEBUG) Track ASR URL (Signature): " + s);
+                    if (Settings.DEBUG) System.out.println("(DEBUG) Track ASR URL (Signature): " + s);
                 }
                 else
                 {
-                    System.out.println("(DEBUG) Track URL (Signature): " + s);
+                    if (Settings.DEBUG) System.out.println("(DEBUG) Track URL (Signature): " + s);
                 }
                 
                 return s;                
@@ -224,15 +239,16 @@ public class NetSubtitle {
     
     public String getTargetURL(NetSubtitle source) throws UnsupportedEncodingException {
         String s;
+        
         try
         {
             //Network.setMethod(Method.YouTubeSignature);
-            s = getTargetURL(Network.getMethod(), source);
+            s = getTargetURL(video.getMethod(), source);
             return s;
         }
         catch (Exception e) {
-            Network.setMethod(Method.YouTubeLegacy);
-            s = getTargetURL(Network.getMethod(), source);
+            video.setMethod(Method.YouTubeLegacy);
+            s = getTargetURL(video.getMethod(), source);
             return s;
         }
     }
@@ -248,11 +264,17 @@ public class NetSubtitle {
                         "name=" + URLEncoder.encode(source.name, "UTF-8") +
                         "&lang=" + URLEncoder.encode(source.lang, "UTF-8") +
                         "&tlang=" + URLEncoder.encode(this.lang, "UTF-8") +
-                        "&v=" + URLEncoder.encode(source.id, "UTF-8");
-                System.out.println("(DEBUG) Target URL (Legacy): " + s);
+                        "&v=" + URLEncoder.encode(source.getId(), "UTF-8");
+                if (Settings.DEBUG) System.out.println("(DEBUG) Target URL (Legacy): " + s);
                 return s;
-            case YouTubeSignature:                
-                params = Network.getParams();
+            case YouTubeSignature:
+                /* *** IMPORTANT NOTE ***
+                 * Targets DO NOT use its parent video to generate the URL.
+                 * Current implementation (v0.7) generates all targets (translations/languages) for ONE requested video.
+                 * Therefore, these targets (translations/languages) are reused to get subtitles for other videos.
+                 * 
+                */
+                params = source.getVideo().getParams(); // due to the notes above this is WRONG: params = video.getParams();
                 s = "https://www.youtube.com/api/timedtext" +
                        "?key=" + params.get("key") +
                        "&expire=" + params.get("expire") +
@@ -264,18 +286,18 @@ public class NetSubtitle {
                        "&name=" + URLEncoder.encode(source.name, "UTF-8") +
                        "&lang=" + URLEncoder.encode(source.lang, "UTF-8") +
                        "&tlang=" + URLEncoder.encode(this.lang, "UTF-8") +
-                       "&v=" + URLEncoder.encode(source.id, "UTF-8") +
+                       "&v=" + URLEncoder.encode(source.getId(), "UTF-8") +
                 
                        "&type=track";
                 
                 if (NetSubtitle.Tipus.YouTubeASRTrack.equals(source.type))
                 {
                     s += "&kind=asr";
-                    System.out.println("(DEBUG) Target ASR URL (Signature): " + s);
+                    if (Settings.DEBUG) System.out.println("(DEBUG) Target ASR URL (Signature): " + s);
                 }
                 else
                 {
-                    System.out.println("(DEBUG) Target URL (Signature): " + s);
+                    if (Settings.DEBUG) System.out.println("(DEBUG) Target URL (Signature): " + s);
                 }
 
                 return s;
@@ -288,15 +310,15 @@ public class NetSubtitle {
         switch (method) {
             case Google:
                 s = "http://video.google.com/videotranscript?frame=c&type=list&docid=" + otherparams.get("docid"); //+ id;
-                System.out.println("(DEBUG) List URL: " + s);
+                if (Settings.DEBUG) System.out.println("(DEBUG) List URL: " + s);
                 return s;
             // Subtitles only (until v0.5.6)
             //    s = "http://video.google.com/timedtext?type=list&v=" + id;
-            //    System.out.println("(DEBUG) Tracks list URL: " + s);
+            //    if (Settings.DEBUG) System.out.println("(DEBUG) Tracks list URL: " + s);
             //    return s;
             case YouTubeLegacy: // Subtitles and translations (from v0.6) using "legacy method"
                 s = "http://video.google.com/timedtext?type=list&tlangs=1&v=" + otherparams.get("v");
-                System.out.println("(DEBUG) Tracks with targets list URL (Legacy): " + s);
+                if (Settings.DEBUG) System.out.println("(DEBUG) Tracks with targets list URL (Legacy): " + s);
                 return s;
             case YouTubeSignature:
                 /* ORIGINAL "Magic" URL example
@@ -334,7 +356,7 @@ public class NetSubtitle {
                        "&v=" + otherparams.get("v") +
                        "&asr_langs=" + otherparams.get("asr_langs") +                       
                        "&asrs=1&type=list&tlangs=1";
-            System.out.println("(DEBUG) ASR/tracks with targets list URL (Signature): " + s);
+            if (Settings.DEBUG) System.out.println("(DEBUG) ASR/tracks with targets list URL (Signature): " + s);
             return s;
         }
         return null;
@@ -344,13 +366,14 @@ public class NetSubtitle {
         String result, s;
         String[] strings;
         
-        // "ttsurl": "http:\/\/www.youtube.com\/api\/timedtext?key=yttt1\u0026hl=en_US\u0026expire=1372005633\u0026sparams=asr_langs%2Ccaps%2Cv%2Cexpire\u0026signature=4FE7A8E1FAAE338EAB840B58F3E05D1963F5550D.CE40D0149565FE4035DD4E914C144E864CE28302\u0026caps=asr\u0026v=L1hIAF5YvN0\u0026asr_langs=ko%2Cde%2Cja%2Cpt%2Cen%2Cit%2Cnl%2Ces%2Cru%2Cfr",
-        strings = YouTubeWebSource.split("ttsurl");
+        // Until February 2016: "ttsurl": "http:\/\/www.youtube.com\/api\/timedtext?key=yttt1\u0026hl=en_US\u0026expire=1372005633\u0026sparams=asr_langs%2Ccaps%2Cv%2Cexpire\u0026signature=4FE7A8E1FAAE338EAB840B58F3E05D1963F5550D.CE40D0149565FE4035DD4E914C144E864CE28302\u0026caps=asr\u0026v=L1hIAF5YvN0\u0026asr_langs=ko%2Cde%2Cja%2Cpt%2Cen%2Cit%2Cnl%2Ces%2Cru%2Cfr",
+        // From February 2016: 'TTS_URL': "https:\/\/www.youtube.com\/api\/timedtext?hl=en_GB\u0026asr_langs=pt%2Cja%2Cen%2Cko%2Cru%2Cde%2Cfr%2Ces%2Cnl%2Cit\u0026signature=7F4F021A279BEA2518FCF932FC656565DDB2DD10.A096A19E54BF067FE6620D53D8E70DF7CFEF61C0\u0026expire=1457284335\u0026caps=asr\u0026v=t0S55wvPJ9Y\u0026key=yttt1\u0026sparams=asr_langs%2Ccaps%2Cv%2Cexpire",
+        strings = YouTubeWebSource.split("TTS_URL");
         s = strings[1];
         strings = s.split(",");
         s = strings[0];
         strings = s.split("\"");
-        s = strings[2];
+        s = strings[1];
         
         s = s.replace("\\/", "/");
         s = s.replace("\\u0026", "&");
@@ -358,6 +381,19 @@ public class NetSubtitle {
         result = URLDecoder.decode(s, "UTF-8");
         
         return result;
+    }
+    
+    public static String getVideoTitleFromSource(String YouTubeWebSource) {
+        String s;
+        String[] strings;
+        
+        // "...<title>Video title - YouTube</title>...",
+        strings = YouTubeWebSource.split("<title>");
+        s = strings[1];
+        strings = s.split(" - YouTube</title>");
+        s = strings[0];
+        
+        return s;
     }
     
 }

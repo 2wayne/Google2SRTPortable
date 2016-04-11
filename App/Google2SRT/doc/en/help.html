@@ -7,38 +7,10 @@
 <title>Google2SRT - Download and convert subtitles from YouTube and Google Video - Help</title>
 </head>
 <body bgcolor="#A6BFE6" leftmargin="0" topmargin="0" marginwidth="0" marginheight="0">
-<div class="cap">
-    <div class="lang">
-    &nbsp;<a href="../ca/index.html"><img src="../img/ca.jpg" width="15" height="10" alt="Català" title="Català" border="0"></a>
-	<a href="../en/index.html"><img src="../img/en.jpg" width="15" height="10" alt="English" title="English" border="0"></a>
-	<a href="../es/index.html"><img src="../img/es.jpg" width="15" height="10" alt="Español" title="Español" border="0"></a>
-	<a href="../it/index.html"><img src="../img/it.jpg" width="15" height="10" alt="Italiano" title="Italiano" border="0"></a>
-	<a href="../pt-br/index.html"><img src="../img/pt-br.jpg" width="15" height="10" alt="Português (BR)" title="Português (BR)" border="0"></a>
-    </div>
-  <div style="text-align: center;">Google<span style="color:#EA0000">2</span>SRT</div>
-</div>
-<div class="url_header">
-<a href="http://google2srt.sourceforge.net" class="link">http://google2srt.sourceforge.net&nbsp;&nbsp;</a></div>
-<br><br>
 
+<br><br>
 <table border="0" width="100%">
 <tr>
-<td width="3%"></td>
-<td valign="top" width="7%">
-    <div class="menu">
-    <ul>
-    <li><a href="index.html" class="link2">Home</a></li>
-    <li><a href="download.html" class="link2">Download</a></li>
-    <li><a href="screenshots.html" class="link2">Screenshots</a></li>
-    <li><a href="help.html" class="link2">Help</a></li>
-    </ul>
-    </div>
-<br>
-<center>
-<a href="http://sourceforge.net"><img src="http://sflogo.sourceforge.net/sflogo.php?group_id=238013&amp;type=4" 
-width="125" height="37" border="0" alt="SourceForge.net Logo" /></a>
-</center>
-</td>
 <td width="3%"></td>
 <td valign="top" width="84%">
     <div class="cos">
@@ -52,53 +24,93 @@ width="125" height="37" border="0" alt="SourceForge.net Logo" /></a>
 	<br><br><br><br>
     <a name="install"><b>Installation</b></a><br>
     <ol>
-	<li>Verify your system has <b>Java version 1.5 or higher</b> installed. You can download it from
+	<li>Verify your system has <b>Java version 1.6 or higher</b> installed. You can download it from
 	<a href="http://www.java.com" class="link2" target="_blank">http://www.java.com</a>.</li>
-	<li><b>Download</b> ZIP file from <a href="download.html" class="link2">download section</a>.</li>
-	<li><b>Decompress</b> ZIP file where you want. If you can't do it, install a file archiver, like
-	<a href="http://www.7-zip.org" class="link2" target="_blank">7-Zip</a>.</li>
+	<li><b>Run</b> the installation package for your platform or <b>decompress</b> the ZIP file.</li>
 	<li>
 	<b>That's all!</b> From now on you only need to remember that:<br>
-	a. If you use <b>Windows</b>, you should open <b>run.bat</b> <img src="../img/batch.gif" alt="batch file"> or <b>Google2SRT.jar</b> <img src="../img/jar.png" alt="JAR file">.<br>
-	b. If you use <b>GNU/Linux</b>, you should open <b>run.sh</b> file. <img src="../img/sh.png" alt="shell script"><br>
-	c. If you use <b>another system</b>, you should run on a shell or similar this command: "<b>java -jar Google2SRT.jar</b>".
-	I hope MacOS users could forgive me...
+	a. If you use <b>Windows</b>, you should open <i><b>Google2SRT.exe</b></i> file. <img src="../img/logo.png" alt="google2srt" width="20"><br>
+	b. If you use <b>GNU/Linux</b>, you should open <i><b>run.sh</b></i> file. <img src="../img/sh.png" alt="shell script"><br>
+	c. If you use <b>Mac OS X</b>, you should open <i><b>Google2SRT.jar</b></i> file. <img src="../img/jar.png" alt="JAR file"><br>
+	d. If you use <b>another system</b>, you should run on a shell or similar this command: "<b>java -jar Google2SRT.jar</b>".
 	</li>
 	</ol>
     <br><br>
 	<a name="use"><b>How to use</b></a><br>
+	<ul>	
+	<li><b>Change the language</b>: click on the flags: <img src="../img/ca.jpg" alt="cat">, <img src="../img/en.jpg" alt="eng">, <img src="../img/es.jpg" alt="esp">...</li>
+	<br>
+	<li><b>Choose the source</b>:<br><br>
+		<ul>
+			<li><b>Web</b>: you may provide one video address (URL) to convert subtitles from <b>one video</b>.<br></li>
+			<li><b>URL list</b>: you may provide a list of URL in a text file (one URL per line) to convert subtitles from <b>multiple videos</b>.</li>
+			<li><b>XML file</b>: you may provide a <b>single XML</b> subtitles file (manually downloaded) to convert it to SRT.</li>
+		</ul>
+	</li>
+	<br>
+	<li><b>Choose the output directory</b> where you want to save subtitles on via <b><i>SRT subtitles</i></b>.
+	<br><b>Note:</b> you should choose an empty directory. <b>Files will be overwritten</b> without asking for confirmation</b>.</li>
+	<br>
+	<li><b>Tracks</b>: select <b>what subtitles</b> you want to convert from the list:<br><br>
 	<ul>
-	<li>You can <b>change the language</b> by clicking on the flags: <img src="../img/ca.jpg" alt="cat">, <img src="../img/en.jpg" alt="eng">, <img src="../img/es.jpg" alt="esp">...</li>
-	<br>
-	<li>You can choose what <b>method</b> you will use: Web or XML file. Normally, you will use Web method.<br>
-	<b>Web</b> converts subtitles by only writing the video address (URL) on <b>"Google subtitles"</b> textbox.<br>
-	Using <b>XML file</b> you must first download manually subtitles file. It's an obsolete option, it's there for "emergencies".</li>
-	<br>
-	<li>With <b>Web method</b>, you can get a <b>subtitles list</b> (bottom panel) for your chosen video by using <b>"Read"</b> button.<br>
-	With <b>XML file method</b> there is not a subtitles list (there is only one subtitles set per file).
-	<b>"Browse..."</b> (top) button let you select source file path.
+		<li>You may select individual subtitles.</li>
+		<li><b><i>All</i></b>: all subtitles are selected.</li>
+		<li><b><i>Invert</i></b>: current selection is inverted.</li>
+	</ul>
 	</li>
 	<br>
-	<li>You can choose <b>where you want to save</b> subtitles on <b>"SRT subtitles"</b> textbox or <b>"Browse..."</b> (middle) button.</li>
-	<br>
-	<li>You can <b>select what subtitles you want to convert</b> from the list (bottom panel, <b>Tracks</b>). <b>"All"</b> selects all subtitles.
-	<b>"Invert"</b> inverts current selection.
+	<li><b>Translations</b>: select <b>what translations</b> you want to convert from the list:<br>
+	<b>Note</b>: you must select at least one <b>source</b> from <b><i>Tracks</i></b>. <u>Suggestion</u>: avoid an ASR source when possible.
+	<br><br>
+	<ul>
+		<li>You may select individual translations.</li>
+		<li><b><i>All</i></b>: all translations are selected.</li>
+		<li><b><i>Invert</i></b>: current selection is inverted.</li>
+	</ul>
 	</li>
 	<br>
-	<li>You can <b>select what translated subtitles you want to convert</b> from the list (bottom panel, <b>Translations</b>).
-	You must choose a <b>"Source"</b>. <u>Suggestion</u>: avoid "ASR" source when possible.
-	</li>
+	<li><b><i>+Track</i></b>: output file name will include the track name.</li>
 	<br>
-	<li>Occasionally, you would need to <b>synchronize subtitles</b>. <b>"Delay (seconds)"</b> textbox delays subtitles an amount
-	of seconds (if the value it's positive). You can obtain the opposite effect, move forward the subtitles, by writing negative values.<br>
+	<li><b><i>+Title</i></b>: output file name will include the video title.</li>
 	<br>
-	<b>Example</b>: If subtitles appear 6.25 seconds before you want to, you should delay them 6.25 seconds. If subtitles appear 3.70 seconds too
+	<li><b><i>Delay (seconds)</i></b>: subtitles are delayed an amount
+	of seconds (if the value is positive). You can obtain the opposite effect, move forward the subtitles, by writing negative values.<br>	
+	<b>Example</b>: if subtitles appear 6.25 seconds too early, you should delay them 6.25 seconds. If subtitles appear 3.70 seconds too
 	late, you should move them forward adding a delay of -3.70 seconds.
 	</li>
 	<br>
-	<li><b>"Go!"</b> button starts conversion process. If there are many subtitles (one or two hours of video, approximately 180 KB in SRT)
-	it needs 5 seconds approximately.</li>
+	<li><b><i>Go!</i></b>: it starts conversion process. If there are many subtitles (one or two hours of video, approximately 180 KB in SRT)
+	it needs 5 seconds approximately (a single local XML file).</li>
+	<br>
+	<li><b>Usage examples</b>:</li>
 	</ul>
+	<center>
+	<table border="0">
+		<tr>
+			<td align="center">
+				<a href="../img/ss_single_URL_tracks.png"><img src="../img/ss_single_URL_tracks_s.png" border="0" alt="Subtitles from one single video (URL)" title="Subtitles from one single video (URL)"></a><br>
+				Subtitles from one single video (URL)
+			</td>
+			<td width="20px">
+			<td align="center">
+				<a href="../img/ss_single_URL_translations.png"><img src="../img/ss_single_URL_translations_s.png" border="0" alt="Translations from one single video (URL)" title="Translations from one single video (URL)"></a><br>
+				Translations from one single video (URL)
+			</td>
+		</tr>
+		<tr height="20px"><td colspan="3"/></tr>
+		<tr>
+			<td align="center">
+				<a href="../img/ss_URL_list_tracks.png"><img src="../img/ss_URL_list_tracks_s.png" border="0" alt="Subtitles from multiple videos (URL list)" title="Subtitles from multiple videos (URL list)"></a><br>
+				Subtitles from multiple videos (URL list)
+			</td>
+			<td width="20px">
+			<td align="center">
+				<a href="../img/ss_single_XML_file.png"><img src="../img/ss_single_XML_file_s.png" border="0" alt="One single XML subtitles file" title="One single XML subtitles file"></a><br>
+				One single XML subtitles file
+			</td>
+		</tr>
+	</table>
+	</center>
 	<br><br>
 	<a name="trouble"><b>Troubleshooting</b></a><br>
 	<ul>
