@@ -1,4 +1,4 @@
-﻿Google2SRT v0.7.5 – 06/03/2016
+﻿Google2SRT v0.7.6 – 10/12/2017
 kom <not.kom@gmail.com>
 -----------------------------------------------------------
 Google2SRT allows you to download, save and convert subtitles from YouTube and Google Video to SubRip (.srt) format, which is recognized by most video players. You can download XML subtitles or simply type video's URL, Google2SRT will do the rest.
@@ -12,6 +12,7 @@ JAYZMRT: ASR retrieval brainstorming. Beta testing. Chinese translations.
 Anonymous: German translation.
 Nawator: Russian and Ukrainian translations.
 Zoltan Kakuszi: Proxy support.
+G0f: French translation.
 
 
 # Other contributions #

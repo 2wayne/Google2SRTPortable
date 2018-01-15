@@ -126,9 +126,9 @@
                                           <EmptySpace min="-2" pref="44" max="-2" attributes="0"/>
                                           <Group type="103" groupAlignment="1" attributes="0">
                                               <Group type="102" attributes="0">
-                                                  <Component id="jlDelay" min="-2" pref="77" max="-2" attributes="0"/>
+                                                  <Component id="jlDelay" min="-2" pref="132" max="-2" attributes="0"/>
                                                   <EmptySpace max="-2" attributes="0"/>
-                                                  <Component id="jspinnerDelay" min="-2" pref="91" max="-2" attributes="1"/>
+                                                  <Component id="jspinnerDelay" min="-2" pref="77" max="-2" attributes="1"/>
                                               </Group>
                                               <Component id="jtfOutput" min="-2" pref="394" max="-2" attributes="1"/>
                                           </Group>
@@ -400,6 +400,7 @@
     </Component>
     <Component class="javax.swing.JLabel" name="jlDelay">
       <Properties>
+        <Property name="horizontalAlignment" type="int" value="4"/>
         <Property name="text" type="java.lang.String" editor="org.netbeans.modules.i18n.form.FormI18nStringEditor">
           <ResourceString bundle="Bundle.properties" key="GUI.jlDelay.text" replaceFormat="java.util.ResourceBundle.getBundle(&quot;{bundleNameSlashes}&quot;).getString(&quot;{key}&quot;)"/>
         </Property>

@@ -19,7 +19,7 @@
  *
  * @author kom
  * @author Zoltan Kakuszi
- * @version "0.7.4, 10/19/15"
+ * @version "0.7.6, 12/10/17"
  */
 
 import java.io.File;
@@ -40,7 +40,7 @@ import org.jdom.output.XMLOutputter;
 
 
 public class Settings {
-    protected static final boolean DEBUG = false;
+    protected static final boolean DEBUG = true; // Enabled debug mode by default may be useful to troubleshoot
     protected static final String PROJECT_URL = "http://google2srt.sourceforge.net";
     protected static final String PROJECT_README = "README.TXT";
     protected static final String PROJECT_HELP_NON_LOCALISED_PATH = "doc";

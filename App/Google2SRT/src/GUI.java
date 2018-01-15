@@ -19,7 +19,7 @@
  *
  * @author kom
  * @author Zoltan Kakuszi
- * @version "0.7.4, 10/19/15"
+ * @version "0.7.6, 12/10/17"
  */
 
 
@@ -91,7 +91,6 @@ public class GUI extends javax.swing.JFrame {
         jtTargetList.setAutoCreateRowSorter(true);
         
         // *** TRANSLATION PENDING ***
-        this.jbutSetLangFr.setVisible(false);
         this.jbutSetLangPl.setVisible(false);
         
         // Window is centered
@@ -602,6 +601,7 @@ public class GUI extends javax.swing.JFrame {
         jlSubOut.setText(bundle.getString("GUI.jlSubOut.text")); // NOI18N
         jlSubOut.setHorizontalTextPosition(javax.swing.SwingConstants.RIGHT);
 
+        jlDelay.setHorizontalAlignment(javax.swing.SwingConstants.RIGHT);
         jlDelay.setText(bundle.getString("GUI.jlDelay.text")); // NOI18N
 
         jbutSetLangCa.setFont(new java.awt.Font("Tahoma", 0, 8)); // NOI18N
@@ -918,9 +918,9 @@ public class GUI extends javax.swing.JFrame {
                                             .addGap(44, 44, 44)
                                             .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
                                                 .addGroup(layout.createSequentialGroup()
-                                                    .addComponent(jlDelay, javax.swing.GroupLayout.PREFERRED_SIZE, 77, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                                    .addComponent(jlDelay, javax.swing.GroupLayout.PREFERRED_SIZE, 132, javax.swing.GroupLayout.PREFERRED_SIZE)
                                                     .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                                                    .addComponent(jspinnerDelay, javax.swing.GroupLayout.PREFERRED_SIZE, 91, javax.swing.GroupLayout.PREFERRED_SIZE))
+                                                    .addComponent(jspinnerDelay, javax.swing.GroupLayout.PREFERRED_SIZE, 77, javax.swing.GroupLayout.PREFERRED_SIZE))
                                                 .addComponent(jtfOutput, javax.swing.GroupLayout.PREFERRED_SIZE, 394, javax.swing.GroupLayout.PREFERRED_SIZE))
                                             .addGap(18, 18, 18)
                                             .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)

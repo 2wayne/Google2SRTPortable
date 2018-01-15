@@ -1,3 +1,7 @@
+Google2SRT 0.7.6 - 10/12/2017
+* Added French language support (GUI). Thanks G0f!
+* Enabled debug mode by default, so if you run the JAR from the command line you can see the URLs and other technical information.
+
 Google2SRT 0.7.5 - 06/03/2016
 * Fixed issue with "signature method" affecting ASR retrieval since recent change on YouTube source.
 
